@@ -1,0 +1,2361 @@
+bug report ID,sentence,intention
+1, MattN noticed a problem with the WIP patch from bug 469443 applied.,0
+1," When typing in the search box, sometimes search-suggestion entries would be displayed above the divider (where entries for previous matching searches are).",0
+1, The problem here is that nsSearchSuggestions.js is passing the wrong previousResult to form history.,0
+1," Instead of it being the previous form history search result, it's the SuggestAutoCompleteResult result (which contains the union of the form-history and search-suggest entries).",0
+1," So, when form history refines its results as you time, it can actually add *more* entries as data leaks from the suggestions result into form history result, and it thus looks like the divider is being drawn in the wrong place.",5
+1," This bug wasn't visible before 469443, because nsFormFillController::StartSearch tries to QI the provided result to a nsIAutoCompleteSimpleResult. ",0
+1," The search-suggestion result is only implements nsIAutoCompletResult (no \""Simple\""), so the QI fails, historyResult nee previousResult becomes null, and thus Satchel was doing a new search every time.",0
+1, EG:,0
+1," 1) type \""b\"" in the search field.",0
+1," 2) form history finds 1 entry (\""blah\""), search-suggestions finds \""baaa\"", \""bloop\"", \""bzzz\"", the autocompete menu shows these in order with a divider between \""blah\"" and \""baaa\"".",0
+1," 3) type an \""l\"" in the search field (\""bl\"")",0
+1," 4) startHistorySearch()'s previous result contains [\""blah\"", \""baaa\"", \""bloop\"", \""bzzz\""], Satchel filters this down to [\""blah\"", \""bloop\""] to match the new \""bl\"" search string",0
+1," 5) nsSearchSuggestions's onReadyState() change is called with updated search suggestions, builds up a new list of results, but sees that the form history result now has *two* entries.",0
+1, Created an attachment (id=380567) [details] Patch v.1 (WIP),6
+1," This fixes the problem, but isn't quite correct...",2
+1," If you type \""a&lt;backspace&gt;b\"", satchel trying to use the results from the \""a\"" search for the \""b\"" search, and so nothing is found. ",0
+1," I suspect nsSearchSuggestions needs to throw away the old form history result when the search string changes like this, but I'm not entirely sure it's responsible for doing so, maybe satchel should be smarter about throwing away a previous result when the previous result's search string doesn't have a common prefix.",2
+1," [That seems to be handled somewhere else for normal form field entries, oddly enough.]",2
+1, Created an attachment (id=383211) [details] Patch v.2,6
+1," Ah. So, there's a ._formHistoryResult in the SuggestAutoCompleteResult wrapper (used to combine form history with search suggestions), and also a ._formHistoryResult in SuggestAutoComplete (the service itself, used to hold onto a form history result until a search suggestion is available).",0
+1, The simple fix it to just discard the service's form history result copy when startSearch() is called with a null previous result.,1
+1, Otherwise it's trying to use a old form history result that no longer applies for the search string.,1
+1, (From update of attachment 383211 [details]),6
+1, Perhaps we should rename one of them to _fhResult just to reduce confusion?,5
+1, (In reply to comment #3),6
+1, &gt; (From update of attachment 383211 [details] [details]),6
+1, &gt; Perhaps we should rename one of them to _fhResult just to reduce confusion?,6
+1, Good point.,6
+1, I renamed the one in the wrapper to _formHistResult. ,1
+1, fhResult seemed maybe a bit too short.,2
+1, Pushed http://hg.mozilla.org/mozilla-central/rev/097598383614,4
+2, That pref was thought to be for extensions which wanted to completely replace our own Session Restore functionality.,0
+2," While this has worked somehow for Tab Mix Plus, we've had several issues with people ending up both Session Restore and Tab Mix Plus disabled (see bug 435055 and its duplicates).",0
+2," Furthermore, there are several code points which will also break when Session Restore has been disabled (such as the list of recently closed tabs).",0
+2," Instead of adding try-catch-blocks wherever we use Session Restore, I'd much rather encourage extensions authors to override both nsSessionStartup and nsSessionStore to provide the same API with their own functionality (or implementing a dummy-API and making sure for themselves that they've correctly replaced all known consumers).",5
+2, This would also make the lives of those other extension authors simpler who so far can't be too sure that the Session Store component actually works (through whatever implementation).,5
+2, Note that privacy concerned users will still be able to disable writing to sessionstore.js through the browser.sessionstore.resume_from_crash pref.,5
+2, Created an attachment (id=332726) [details] ,6
+2, remove the pref,6
+2, (note: bug 448725 should be wontfixed if this is fixed),6
+2, Created an attachment (id=333820) [details],6
+2, remove (buggy) note from API comments,6
+2, (From update of attachment 332726 [details]),4
+2," a problem with this patch is that the session data is still stored in memory while the app is running, and by removing this pref, there's no way to disable that.",0
+2," some users do not want the recently-closed-tabs menu, and others don't want any session tracks stored in memory at all.",2
+2, (In reply to comment #4),6
+2," &gt; some users do not want the recently-closed-tabs menu,",4
+2, That's what browser.sessionstore.max_tabs_undo is for: setting it to 0 effectively disables the feature.,1
+2, &gt; and others don't want any session tracks stored in memory at all.,4
+2," Then again, we don't save any data that wouldn't be in memory, anyway, or do we?",3
+2, I'd rather introduce a different pref or different means to cater the privacy sensitive users than have this half-baked cut-it-all pref which AFAICT so far has produced more issues than it's solved.,5
+2, (In reply to comment #5),4
+2," &gt; Then again, we don't save any data that wouldn't be in memory, anyway, or do we?",4
+2, Fair point. I'm not sure.,6
+2, &gt; I'd rather introduce a different pref or different means to cater the privacy sensitive users than have this half-baked cut-it-all pref which AFAICT so far has produced more issues than it's solved.,4
+2," Yes, agreed the pref is not ideal for this purpose.",2
+2," So max_tabs_undo=0 + resume_from_crash=false is fine for now, until proper \""private browsing\"" is supported.",2
+2, (From update of attachment 332726 [details]),4
+2, &gt;+            // XXXzeniko should't we just disable this item as we disable,4
+2, &gt;+            // the tabbrowser-multiple items above - for consistency?,4
+2, &gt;+            this.mUndoCloseTabMenuItem.hidden =,4
+2," &gt;+              Cc[\""@mozilla.org/browser/sessionstore;1\""].",4
+2, &gt;+              getService(Ci.nsISessionStore).,4
+2, &gt;+              getClosedTabCount(window) == 0;,4
+2,1,4
+2, r=me,4
+2, (In reply to comment #7),4
+2, &gt; +1,4
+2, That's bug 350731.,6
+2, Care to convince mconnor that he's wrong? ;-),6
+2, Pushed as 17120:e712e96d7861 and 17121:adb1ef78dd21.,4
+2, onemen: This patch significantly affects Tab Mix Plus:,4
+2," Instead of disabling SessionStore, you'll now have to replace it by shipping a component which implements the same API.",5
+2," You should be able to keep that component minimal, though, and just call your own code whenever the API is used.",5
+2," This will make the lives of people using the SessionStore API (such as Session Manager) somewhat simpler, as they can just use the API without having to worry too much about the implementation behind it.",2
+2," If you want to offer the option of switching between your and our implementation, see e.g. the ignore-history component of the Torbutton extension for how to overwrite a component with the original still being available internally (so that you can either pass API calls forward or handle them yourself).",5
+2, Sounds like this has impact for extension authors and so should be documented on MDC,5
+2, no problem.,6
+2, current Tabmix dev-build already not disable SessionStore,2
+2," I currently have only one problem , how to disable the restore after restart.",3
+2," can you add a pref for this, or some other way to do it?",3
+2, (In reply to comment #12),4
+2," &gt; I currently have only one problem , how to disable the restore after restart.",4
+2, You've got several options for that:,6
+2, * Set the prefs browser.sessionstore.resume_from_crash and browser.sessionstore.resume_session_once both to false as early as possible and make sure that browser.startup.page isn't 3.,1
+2, * Delete the file sessionstore.js as early as possible (e.g. when the profile-after-change notification is dispatched).,1
+2, * For Firefox 3.1: Respond to the sessionstore-state-read notification by setting the subject's data member to an empty string (cf. bug 448741 comment#6).,1
+2, Or is there a use case I'm missing?,3
+3," I've noticed that I frequently trigger the rotate gesture accidentally, usually while scrolling.",0
+3," Gestures have improved since the original landing (when triggering the wrong gesture was really easy), but this articular gesture is still problematic.",0
+3, The basic reasoning is that it's highly disruptive to be switched to another tab when you're not expecting it.,0
+3," When it happens, you don't know what just happened until you notice that you're on some entirely different page, that's randomly to the left or right (1 or more tabs) from the page you thought you were on.",0
+3," I'm don't think the rotate gesture for switching tabs is nearly as useful, discoverable, or a good fit as the other gestures are.",2
+3," So, given this problem, we should just disable it for 3.5. ",5
+3," [I'd also be open to tweaking it to make it much harder to trigger accidentally, dunno if that's possible.]",5
+3, See also bug 461376. ,6
+3, Just play around with browser.gesture.twist.* in about:config as a temporary workaround.,5
+3," Justin, the odd thing here is that I find I trigger zoom more frequently than tab rotate ... far far more frequently.",0
+3," And I also find that it's not just in Firefox, it's all over OSX.",0
+3, I wonder how much of this is us vs. odd timings causing misreads of the trackpad by OSX.,2
+3, I think I've never accidentally switched tab because of rotate gesture.,2
+3, Actually I'd probably decrease the default threshold for tab switching.,5
+3, I've triggered zoom repeatedly too; ,2
+3, usually I fix it right away but a quick browse though content-prefs.sqlite shows ~20 sites with zoom settings that I didn't know were set.,5
+3," That's probably because zoom is a subtle effect (for 1 step, relative to the distraction that an accidental tab switch causes).",5
+3," While playing with different browser.gesture.twist settings, I've found twisting through tabs often resulted in triggering a zoom. ",0
+3," Probably because a twist is a very awkward gesture to make, especially if it's more than a quarter-turn... ",5
+3," Around that point, my fingers want to spread or join, and that ends up read as a pinch. ",0
+3," I guess that's part of why I'm not really fond of this gesture, and would just as soon turn it off.",5
+3," I'll try running with a threshold of 40, but I suspect there's an unavoidable conflict between making it easy to use on purpose, yet hard to invoke accidentally.",5
+3," I've been using swipe left/right to change tabs and cmd-left/right to go back/forward, but I do have rotate as change tabs as well and I haven't accidentally triggered it.",2
+3, Maybe it's your rotating technique ;) ,2
+3, I'm right handed and I position my index finger at 7oclock and ring finger at 1oclock. ,5
+3, To rotate right I end up at 8/2oclocks.,5
+3, The first time I came into contact with tab switching via gesture was accidentally. ,2
+3," I wasn't sure what happened, I just appeared on another tab and couldn't figure out why. ",2
+3, The tab-switching gesture right now isn't obvious and feels unexpected when I hit it.,2
+3," Mardak: the way you've written this code, disabling the gesture is a pref-flip, right?",3
+3," Blocking here for decision and mulling, will probably take it though.",2
+3," Yup, should be able to just unset the default value for the twist prefs:",5
+3," -pref(\""browser.gesture.twist.right\"", \""Browser:NextTab\"");",4
+3," -pref(\""browser.gesture.twist.left\"", \""Browser:PrevTab\"");",4
+3," Would setting the value to empty-string (\""\"") work, or something similar? ",3
+3, It would be nice to leave the prefs visible for those who want to use them.,5
+3, Since this is now implemented on Win7 with Multitouch screens please be sure not to disable it for Windows.,5
+3, (In reply to comment #10),4
+3, &gt; Since this is now implemented on Win7 with Multitouch screens please be sure not to disable it for Windows.,4
+3, Fine by me; though I'd be a bit wary of having Windows users hit the same problem with multitouch trackpads...,2
+3," But Rob says such hardware/drivers doesn't exist today, so it shouldn't be a common problem.",2
+3," We should keep on eye out for problems with issues on touchscreens, andt from Rob demoing it on his touchscreen it would appear harder to trigger. ",5
+3, And maybe Windows 7 is just better at discriminating between gestures.,5
+3, OTOH it wouldn't be a big deal to just disable it globally. ,5
+3," Safari doesn't use it, and Rob confirmed that IE doesn't use it on Windows 7.",2
+3," This bug is just rotate, but do we want to consider pinching too?",3
+3," If we take those out, we'll have swipe up/down as jump to top/bottom and swipe left/right as back/forward by default.",5
+3, (In reply to comment #12),4
+3," &gt; This bug is just rotate, but do we want to consider pinching too?",4
+3, Maybe; it certainly has been noted that people are accidentally hitting that gesture too. ,2
+3," Though I think it's a separate decision: rotate is an unnatural gesture for switching tabs (nothing else uses it this way), with a high penalty for accidentally triggering. ",2
+3," Pinching is a natural gesture for page zoom (and more widely used/known), with a low penalty for accidentally triggering. ",0
+3," I think most people would consider it a bug if we claimed to support multitouch, but pinch didn't do anything.",2
+3," So, I'd strongly lean towards only removing the rotate. Pinchy would've wanted it this way.",5
+3, (In reply to comment #12),4
+3," &gt; This bug is just rotate, but do we want to consider pinching too?",4
+3, &gt; ,4
+3," &gt; If we take those out, we'll have swipe up/down as jump to top/bottom and swipe left/right as back/forward by default.",4
+3, pinch should definitely be left on for win7.,5
+3, Tracking is turned off so you get a nice zoom in/zoom out effect. ,5
+3, It's also nearly impossible to trigger without a definitive pinch with two fingers on the screen.,2
+3," If you want to consider disabling pinch, please file a separate bug, do not conflate. ",5
+3," FWIW, I'm not nearly as keen on disabling that one, and am fairly-to-surely likely to WONTFIX such a bug.",2
+3, But go ahead ... try me ;) ,6
+3, Created an attachment (id=376850) [details],4
+3, v1,4
+3, Don't do anything on os x when twisting.,5
+3," Alternatively, have people tried upping the threshold for twist? ",5
+3, It would make it less likely to accidentally trigger.,5
+3, But I just noticed something interesting in os x's gesture detection.,2
+3," - If I use 2 hands (1 finger each) and place one at the top and one at the bottom, moving the top finger registers as a normal mouse move while moving the bottom finger is registered as a twist.",0
+3, I suppose the heuristic there is to assume the top finger is used for scrolling.,0
+3," - Also, if your fingers are too close to the edge, it won't treat it as a rotate. But you can still move the pointer from the edge.",0
+3, Can we get the patch reviewed - I think we want to remove the rotate gesture on both Windows and OSX.,5
+3, Created an attachment (id=378424) [details],4
+3, v2,4
+3, both Windows and OSX.,4
+3, (From update of attachment 378424 [details]),4
+3, uir+r=beltzner,4
+3, http://hg.mozilla.org/mozilla-central/rev/d19424342b43,4
+3," Give empty commands for twist gestures, so they do nothing, but still show up as prefs in about:config.",5
+3, http://hg.mozilla.org/releases/mozilla-1.9.1/rev/3329a3997d7b,4
+3, Verified fixed on trunk and 1.9.1 with builds on OS X and Windows like:,4
+3, Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.5; en-US; rv:1.9.2a1pre) Gecko/20090525 Minefield/3.6a1pre ID:20090525031110,4
+3, Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.5; en-US; rv:1.9.1pre) Gecko/20090526 Shiretoko/3.5pre ID:20090526031155,4
+3," Off the back of this, would there be any chance of getting...",5
+3, browser.gesture.swipe.left.shift added and set to Browser:PrevTab,4
+3, and,6
+3, browser.gesture.swipe.right.shift added and set to Browser:NextTab,4
+3," Having made this change, I must admit to now finding Firefox almost 'alien' to use on other multi-touch machines!",2
+3, https://bugzilla.mozilla.org/show_bug.cgi?id=502500,4
+4, Problem:,6
+4," The method FolderDescription#createExistentResourceFromHandle(IResource,IProgressMonitor) checks if the folder already exists and returns immediately if so.",0
+4," In cases where the FolderDescription has members which are not existing at that moment, that members will not be created.",0
+4, Use case:,6
+4, Assume you want to create a folder and a file in that folder and use two operations for this. ,5
+4, I know it is not necessary to use two operations but my configuration is more complex than this example code.,2
+4, IFolder folder = ... // must not exist,4
+4," CreateFolderOperation op1 = new CreateFolderOperation(folder,...);",4
+4, IFile file = folder.getFile(...); // must not exist,4
+4," CreateFileOperation op1 = new CreateFileOperation(file,...);",4
+4, op1.execute(...);,4
+4, op2.execute(...);,4
+4, The execution of the op2 does not create the file because as stated above createExistentResourceFromHandle returns immediately because the parent folder of the file was created by op1.,0
+4, IMHO createExistentResourceFromHandle must check if members of a FolderDescription should be created.,5
+4, I checked the code in the ganymede release and the problem should exist there too.,3
+4, Is there any reason you cannot execute op1 before creating op2?,3
+4," The basic problem is that the workspace file structure has changed since you first created the operation, so the change described by the operation is no longer valid.",0
+4, &gt;Is there any reason you cannot execute op1 before creating op2?,4
+4, No there is not.,6
+4, In the meantime I found a workaround in my code but I think it's very inconvenient that someone must know that op2 have to be created after the execution of op1. ,1
+4, The API gave me no hint that I have to do so!,6
+4, Maybe the build of the FolderDescription could be delayed until the execution of op2.,5
+4, Think about cases where the to ops have nothing in common e.g. created and executed in different plug-ins.,5
+4, I'll mark this one for M4.,6
+4," I think what needs to happen is that the javadoc better describes the lifecycle of these operations, and the isValid() method is tightened up so that the operation becomes invalid when the workspace changes to no longer match its recorded state.  ",5
+4," It is not the intention of these classes to stay in synch with workspace changes that happen independently of a shared, sequential workspace history.",1
+4, Moving target as M6 has shipped.,4
+4, Fixed in HEAD &gt;20090416.,4
+4," In order to understand better what the ramifications might be of actually fixing this bug vs. better documenting the limitations and usage, I started by implementing a trial fix for the problem as reported.",1
+4, It is pretty straightforward to rearrange the code to create the child resources (the file) even if the parent exists since the operation was created.,1
+4," However, the problems occur later when you try to undo such an operation. ",0
+4," Since the operation \""remembered\"" that the folder didn't exist when it was first created, the undo of the create file operation tries to also delete the folder.  ",1
+4," This means that to truly fix the bug, we'd have to change the operations so that the resource descriptions were constantly updated to deal with changes that occurred.",1
+4, So I still believe it's better to document more clearly what the intentions of the API are.  ,1
+4," I've updated the javadoc for AbstractResourcesOperation, CreateFileOperation, and CreateFolderOperation.  ",1
+4," In addition, I created a stricter validity check on CreateFileOperation so that the operation will return an invalid status if portions of the resource tree already exist.  ",1
+4, Created WorkspaceOperationsTest.test250125() to simulate this condition.  ,1
+4," The CreateFileOperation is valid until the CreateFolderOperation is run, at which time the file operation knows it is invalid.",1
+4," &gt; In addition, I created a stricter validity check on CreateFileOperation so that the operation will return an invalid status if portions of the resource tree already exist. ",4
+4, What I meant to say is...,6
+4, I created a stricter validity check on CreateFileOperation so that the operation will return an invalid status if portions of the resource tree *that did not exist when the operation was created* already exist at the time of execution.  ,1
+4," It is expected/allowed that the containment tree already exists when the op is executed, as long they also existed when the op was created.",1
+4, verified via automated test cases that run on each build.,1
+4, Also verified through source inspection,1
+5," Inspired by Martin Oberhuber's mail about his \""lsc\"" script for counting lines in a patch[1], I though that it maybe be worthwhile to embed such thing in the Apply Patch wizard itself. ",5
+5," imo using regexp should be enough here, especially due to the fact that we don't want to make any additional dependencies. ",5
+5," So, my proposal is to allow to specify a regexp rule for lines that should be count as a \""real contribution\"".",5
+5, This is what first came to my head:,6
+5, /-\\\\+? (\\s*\\S+\\s*)+$,4
+5," which means \""Count only lines starting with single '+' and a space. ",5
+5," The line must also have at least one non-whitespace character\"". ",5
+5, I think this is more/less what Martin's script does.,2
+5, All lines that match the above pattern would be sum up and the info would be displayed somewhere on the Apply Patch wizard. ,1
+5, How does it sound? Martin?,3
+5," Again, I think it's a brilliant idea Martin.",6
+5, [1] sent to eclipse.org-committers,4
+5, The info could be also shown in a patch outline view (see bug 190418).,4
+5, Excellent idea! ,6
+5, Having the line counter right in the apply patch wizard would finally give us a standard way of counting lines that everybody could use easily.,5
+5," My script also ignores \""empty comment\"" lines of the form",5
+5,    /-\\\\+\\s+[#*]+\\s+$,4
+5, but that's really neglectible and I'm fine with your approach of counting any non-empty added line in the patch.,5
+5," Actually, couldn't your regex even be simpler, say",5
+5,    /-\\\\+\\s+\\S,4
+5, since you don't need to check till the end of the line?,3
+5," And actually, if the wizard counts added lines, why shouldn't it also count removed lines? ",5
+5, Giving two separate numbers e.g.,5
+5,    10 lines added  20 lines removed,4
+5, This sounds familiar to me since I've seen similar numbers in RCS files before.,5
+5," I'd guess that the regex for removed lines could just be the same as for added lines but the + replaced by a -; and, files removed entirely should contribute the entire number of lines they had before (I believe that the old contents is",5
+5," not recorded in the diff, is it?)",3
+5, Created an attachment (id=94358) [details],4
+5, Patch,4
+5, Fix that matches all lines from a patch against given regexps (one for added lines and one for removed). ,1
+5, Patterns can be changed on General &gt; Compare/Patch pref page. ,1
+5," I decided to leave them blank by default, so I don't need to worry about different diff output formats which are out there. ",1
+5," However, you can easily set it to a value most convenient to you (i.e. '/-\\\\+\\s+\\S').",1
+5, Created an attachment (id=94360) [details],4
+5, mylyn/context/zip,4
+5, (In reply to comment #4),4
+5," &gt; I decided to leave them blank by default, so I don't need to worry",4
+5," So this means it won't work out of the box? But then, the compare/patch feature already needs to analyze patches or it cannot apply them, right? ",2
+5, So I don't quite understand why the same patterns that compare/patch already uses aren't the default for the line counting feature.,2
+5, (In reply to comment #6),4
+5, &gt; So this means it won't work out of the box? ,4
+5," &gt; But then, the compare/patch feature already needs to analyze patches or it cannot apply them, right? ",4
+5, &gt; So I don't &gt; quite understand why the same patterns that compare/patch already uses aren't the default for the line counting feature.,4
+5," I guess you're right Martin, but this will make the patch a little bit more complicated as the current patching mechanism is not very helpful in counting added/removed lines. ",2
+5, I'll just need some extra time to do this.,2
+5, Created an attachment (id=96838) [details],4
+5, Patch 2,4
+5, Created an attachment (id=96839) [details],4
+5, mylyn/context/zip,4
+5," The latest patch ensures, that when no regular expressions is provided, the patcher will use internal patterns to distinguish which lines have been added or deleted. ",1
+5," However, this will work only for patches in unified and context diff output format. ",1
+5," As reported in bug 227742, it appears that standard patch format is no longer supported (or it has never been).",0
+5," Moreover, I logged bug 228000 to make sure we add some automated tests to cover this newly added feature.",4
+5, Created an attachment (id=96993) [details],4
+5, Patch 3,4
+5, Previous patch with some minor adjustments.,4
+5, The latest patch applied to CVS HEAD. ,4
+5," Martin, would you like to try it out and let me know what do you think? ",6
+5, Feel free to open a new bug if there is something I missed.,6
+5," I tested this with I20080422-0800, on the attached patch from bug 227572 attachment 97084 [details]. ",4
+5," Your dialog counts 207 added and 29 removed lines, but my script only counts 151 added lines.",2
+5," It looks like you are also counting empty lines, which doesn't seem overly useful to me.",5
+5, Created an attachment (id=97398) [details],4
+5, The preference page,4
+5," The \""internal\"" mechanism of counting added/removed lines is very simple, it sums up all lines with '+' and '-'. ",1
+5, If you want to use your own patterns/script please take a look at the General &gt; Compare/Patch pref page. ,5
+5, I've added there two fields where you can customize the way this simple mechanism works.,1
+5," It's awsome that this is customizeable, but when I remember right, one reason for putting this enhancement into Eclipse SDK was such that there is a \""common standard\"" by which the projects count their lines in a patch.",2
+5," I think that this \""common standard\"" should be as good as possible by default.",5
+5," On the other hand, having some magic like removing empty lines from the count going on in the background is perhaps a problem... ",5
+5," would it be possible to keep your current count (\""211 added / 53 removed lines\"") but add an additional count without empty lines e.g.",5
+5," Note that I'm only talking about empty lines here, e.g. Regex \""/-\\\\\\s*$\"". ",5
+5," I agree that we cannot count empty comments here by default, because comment styles differ by language. ",2
+5," Actually, it might be a good idea to have one additional kind of Regex pattern in the Preferences, which acts as a filter -- suggested tooltip behind //:",5
+5,   Added Lines:    /-\\+,4
+5,   Removed Lines:  /-\\-,4
+5,"   Filter:         /-\\[+-]\\s*$     //Filter for lines to not count, e.g. empty lines",4
+5," providing an output such as   \""Patch contains 207 added and 29 removed lines (151 / 27 filtered)\""",5
+5," Martin, I see your point when you're saying that the \""common standard\"" should be as good as possible, however I would rather not to filter any lines from a patch when parsing. Here are the approaches so far:",2
+5," 1) Use only given filters, by default no counting will be made. ",5
+5, This is how the patch from comment 4 worked. ,6
+5, Rejected.,6
+5," 2) By default count lines using the simple patterns, which are currently used when parsing a patch (ie \""+\"" and \""-\""), this can be modified in the pref page.",2
+5, Patch in comment 13. ,4
+5, In HEAD.,6
+5, 3) By default count lines using more sophisticated patterns like excluding empty lines. ,2
+5," And again, this can be modified in the pref page. ",2
+5, If I understood you correctly this is what you meant in comment 15. ,2
+5, My main concern here is:,2
+5," what if I would like to know total number of lines added in the patch (the filter idea looks to be an answer here but it's a pref value, it's not embedded in the parser itself, right?)",3
+5, 4) By default count lines using both simple and sophisticated patterns at the same time. ,2
+5," The output would be something like this \""Patch contains X added and Y removed lines + Z added lines which are empty\"". Again, the user could provide his own patterns... ",1
+5, which makes the whole mechanism overblown and not as intuitive as I would like it to be.,2
+5," Regarding the filter idea: it sounds good to me, but I think we should move the discussion about it to a separate bug.",2
+5, Would you mind opening one?,3
+5," btw, thanks for your feedback Martin.",6
+5, Verified in I20080429-0100. ,4
+5, Martin are you willing to open new bugs to address your concerns?,3
+5," FYI,",6
+5," following regex suppresses lines in the patch from counting, which are empty or only contain non-wordchars (i.e. lines which only contain an } or only contain a * as continuation of an empty Javadoc comment:",1
+5," Added:     /-\\\\+[/-\\+]+[a-zA-Z0-9_!?\""|@~`$%&()+;,.:&lt;&gt;=+-]",4
+5," Removed:   /-\\-[/-\\-]+[a-zA-Z0-9_!?\""|@~`$%&()+;,.:&lt;&gt;=+-]",4
+6," According to the javaDoc in Platform.getResourceString(Bundle,String), this method has been deprecated and one should use the NLS class or the BundleFinder.find(). ",0
+6, I was able to find the NLS class but I didn't find the BundleFinder class. ,0
+6, Is the javaDoc correct? ,3
+6, if it is a hint on where to find the BundleFinder class would help.,0
+6," The NLS class doesn't seem to provide me with the same functionality that Platform.getResourceString does, so I am assuming that BundleFinder would do the job that I need.",0
+6, Please provide me with more information on where to find the BundleFinder and improve the javaDoc.,0
+6, I don't think that replacement functionality was ever implemented.,2
+6," Pascal, you added bunch of comments like that to the Platform ver. 1.92. ",4
+6, As there are no current plans to act on them (and there has been no actions done in the last 2 years) I think we need to remove those comments - they make a rather confusing Javadoc.,2
+6," There are 21 \""XXX\"" comments that should be removed from Javadoc or acted upon.",5
+6, Adding M7 as a milestone to remind to remove those comments.,5
+6, (In reply to comment #1),4
+6, &gt; I don't think that replacement functionality was ever implemented. ,4
+6," &gt; Pascal, you added bunch of comments like that to the Platform ver. 1.92. ",4
+6, &gt; As there are no current plans to act on them (and there has been no actions done &gt; in the last 2 years) I think we need to remove those comments - they make a rather confusing Javadoc.,4
+6," &gt; There are 21 \""XXX\"" comments that should be removed from Javadoc or acted upon.",4
+6,  ,4
+6," So are you saying that the support for using getResourceString has just been droppped, and that no replacement will be available? ",3
+6," that concerns me because WTP has a code that uses this method, and I am sure that there is plenty of adopters that are currently using that function as well.",2
+6," The method Platform.getResourceString(Bundle,String) is not deprecated at this time; ",0
+6," the comments should have been added to the implementation code or to a bug report, not to the Javadoc of the Platform class. ",0
+6," Please adjust the target milestone, so it does not point at a closed milestone in the past.",5
+6, From bug 247983 other tagged methods:,4
+6, -getResourceBundle(Bundle),4
+6," -getResourceString(Bundle, String)",4
+6," -getResourceString(Bundle, String, ResourceBundle)",4
+6, *** Bug 247983 has been marked as a duplicate of this bug. ***,4
+6, Removed incorrect comments from the Platform class.,1
+6," We collided, I just made the same changes. ",5
+6, The only difference is that I moved the comments to InternalPlatform. ,1
+6, Also I deprecated Platform#endSplash since this has been replaced with IApplicationContext#applicationRunning().,1
+7," the about:mozilla page in RC2 is right-aligned, but has LTR directionality instead of RTL. ",0
+7," as a result, the dot at the end of the sentence is on the right side instead of the left, and both the parentheses around the \""10th edition\"" line are on the right side.",0
+7, i also think the quote source should be on the left side. ,2
+7," perhaps the page should take CSS from intl.css, where localisers can override some of the classes or add a class to set direction.",5
+7, Actually I would like not to add yet another entry in intl.css but to fix it in aboutMozilla.xhtml. ,3
+7," Pike, can we think about it? ",2
+7, Same behavior also affect other internal about pages.,0
+7, * about:plugins,4
+7, pages that get RTL:,4
+7, * about:crashes,4
+7, * about:robots - Has some open issues. See bug 427029,4
+7," Pages that not translated, such as about:cache, about:credits and about:buildconfig should stay LTR.",4
+7," the about:mozilla page used to be a file in the language pack, allowing the localizer to control it's look. ",0
+7, moving this out of the language pack created this problem.,0
+7, the file dom/chrome/global.dtd control has direction control with the entity locale.dir. ,5
+7," We can, actually, support RTL using something like &lt;body dir=&locale.dir;&gt;.",5
+7, Created an attachment (id=324147) [details],4
+7, patch,4
+7, Here is my patch. ,6
+7, Tested on Hebrew locale.,6
+7," Please let me know if you prefer 'body{direction:&locale.dir;}' instead of the current '&lt;body dir=\""&locale.dir;\""&gt;'.",5
+7, the W3C prefers markup and not CSS:,1
+7, http://www.w3.org/International/questions/qa-bidi-css-markup,4
+7," \""Because directionality is an integral part of the document structure, markup should be used to set the directionality for a document or chunk of information, or to identify places in the text where the Unicode bidirectional algorithm alone is insufficient to achieve desired directionality.\""",5
+7, (In reply to comment #6),4
+7, &gt; the W3C prefers markup and not CSS:,4
+7, Actually I'm not sure how we can do it using CSS.,2
+7, I have no idea if something like 'body{direction:&locale.dir;;}' is a valid. ,2
+7," To me, the trunk solution for this is to have a separate entity for each of those pages, to work around bugs like bug 427029.",5
+7," Once you localize a page we ship, you would then set the dir from ltr to rtl.",5
+7," That's not a solution for the 1.9 branch, though, there we should just re-use locale.dir from global.dtd.",5
+7," IMHO. Gavin, what do you think?",3
+7, (In reply to comment #8),4
+7," &gt; To me, the trunk solution for this is to have a separate entity for each of those pages, to work around bugs like bug 427029.",4
+7,  ,4
+7," &gt; Once you localize a page we ship, you would then set the dir from ltr to rtl.",4
+7," &gt; That's not a solution for the 1.9 branch, though, there we should just re-use locale.dir from global.dtd.",4
+7," Sounds fine to me, I guess... ",6
+7," do we really need to worry about the \""RTL locale that's falling back to en-US\"" though? ",3
+7, Ideally we could just take this patch and not worry about having localizers update various different attributes based on,5
+7," localization state, and just rely on them completing all the localization work to make it look decent.",5
+7," In other words, isn't bug 427029 an edge case given the nature of about:robots and it's \""optional\"" status for localizers? ",3
+7, Seems like we could just live with it not looking perfect for RTL locales that haven't localized it rather than adding complexity.,5
+7," Well, that depends on how disciplined folks are. ",2
+7," We could make that call per page, like in the case of the robots page, it might make sense to have an open window for not translating it, for neterror pages probably less. ",5
+7, There we could even get extreme and do it per div ;-).,5
+7, I'm adding another screenshot to bug 427029. ,4
+7," Axel, Gavin - You are welcome to comment on that issue right there. ",6
+7, We are not far from 1.9.0.1 deadline. ,6
+7, Please approve1.9.0.1. ,6
+7, Thank you.,6
+7, Please get this landed on mozilla-central before getting approval for 1.9.0.x.,5
+7, (From update of attachment 324147 [details]),4
+7, Please re-request approval after getting this landed on mozilla-central.,5
+7," I'm not really sold on taking this given that it's more \""cosmetic\"" than anything else...",2
+7, http://hg.mozilla.org/index.cgi/mozilla-central/rev/d12488eef3f5,4
+8, Here is the JavaDoc for IAdapterManager.computeClassOrder(Class):,4
+8, Returns the class search order for a given class. ,0
+8," The search order from a class with the definition class X extends Y implements A, B is as follows:",0
+8, - the target's class: X ,4
+8, - X's superclasses in order to Object ,4
+8," - a breadth-first traversal of the target class's interfaces in the order returned by getInterfaces (in the example, A and its superinterfaces then B and its superinterfaces) ",4
+8, This comment is not perfectly clear. ,6
+8," In particular, it does not complete the example by explicitly listing the exact order the example classes and interfaces are returned.",0
+8, I came up with a slightly richer example:,2
+8,"     interface A extends M, N",4
+8,     interface B extends O,4
+8,"     class Y implements C, D",4
+8,"     class X extends Y implements A, B",4
+8," [The declarations for interfaces C, D, M, N, and O are trivial.] ",4
+8, The order of classes and interfaces returned by AdapterManager.computeClassOrder(X) is:,4
+8,     class X,4
+8,     interface A,4
+8,     interface B,4
+8,     interface M,4
+8,     interface N,4
+8,     interface O,4
+8,     class Y,4
+8,     interface C,4
+8,     interface D,4
+8,     class java.lang.Object,4
+8," This conflicts with the JavaDoc. The class X is the first thing returned, but it is *not* followed by \""X's superclasses in order to Object\"". ",0
+8," It is followed by a breadth-first list of X's interface hierarchy\"", *then* followed by X's superclass Y, which is then followed by a breadth-first list of Y's interface hierarchy; and so on, up to  java.lang.Object.",0
+8," Also, the JavaDoc has what reads to me as a contradiction:",0
+8,     a breadth-first traversal of the target class's interfaces in the order returned by getInterfaces,0
+8, vs. ,4
+8,"     in the example, A and its superinterfaces then B and its superinterfaces",0
+8," What actually happens *does* feel like a \""breadth-first\"" search; ",0
+8," but that would not be accurately described as \""A and its superinterfaces then B and its superinterfaces\"". ",0
+8, But maybe I'm reading it wrong....,2
+8," It might be worth discussing which is the \""preferred\"" behavior: the behavior described by the JavaDoc or the behavior implemented in AdapterManager. ",5
+8," In some ways having all the classes first, followed by the interfaces might make more sense than the current implementation.... ",5
+8," But, then you have the whole \""backward-compatibility\"" thing to worry about....",5
+8, You are right on both counts. ,2
+8," The implementation doesn't match the spec, and there is a contradiction in the spec itself. ",0
+8, Now the question is what do we do about it.,0
+8,"  - For the contradiction, I think we should stick with the breadth-first search, and delete the parenthetic comment about the example (\""A and its superinterfaces then B and its superinterfaces\"")",5
+8,"  - For the spec not matching the behaviour, my instinct is to \""fix\"" the spec to match the implementation, to avoid the risk of breaking clients. ",5
+8, This would be a very subtle change that could affect clients in unpredictable ways. ,0
+8," On the other hand if there are really compelling reasons to change the implementation to match the spec, I'd be curious to hear them.",5
+8," I did some research and found that the implementation did match the spec until Febuary 20, 2004, when I change the implementation. ",0
+8, At that time the spec wasn't part of the API. ,0
+8, The spec was later added to the API (IAdapterManager#computeClassOrder) without checking that the implementation still matched. ,5
+8, I'm going to do some more archeology to see if I can figure out why I changed the lookup order.,5
+8, It would be interesting to know what triggered the change in behavior.,2
+8," I guess the question is whether superclasses take precedence over interfaces defined lower in the hierarchy, i.e. does the implementation take precedence over the specification? ",2
+8, I can see arguments for either way; but I guess I would probably come down on the side of giving specification precedence. ,2
+8," So, I guess you argue further that all the interfaces could precede all the classes?",2
+8, Argh...why did I even ask? :-),3
+8," Anyway, I don't have any use cases at the moment to argue one way or the other.",0
+8," It's just that my curiosity got the better of me, after years of wondering, \""Just how does the Platform resolve which adapter to return?\"" :-)",0
+8, It looks like this change was made inadvertently during a large batch of changes to add support for the adapters extension point (bug 32498). ,0
+8," I think since this change was introduced accidentally, and this is a clear violation of a long-standing specification, I'm leaning towards fixing the implementation. ",2
+8, I noticed the spec also doesn't mention the interfaces of the target class' superclasses. ,0
+8, I think the corrected spec should read:,5
+8,          * &lt;ul&gt;,4
+8,          * &lt;li&gt;the target's class: X,4
+8,          * &lt;li&gt;X's superclasses in order to &lt;code&gt;Object&lt;/code&gt;,4
+8,"          * &lt;li&gt;a breadth-first traversal of the target class's interfaces in the order returned by &lt;code&gt;getInterfaces&lt;/code&gt; (in the example, X and its superinterfaces then Y and its superinterfaces) &lt;/li&gt;",4
+8,          * &lt;/ul&gt;,4
+8," Note that the comment changed to \""X and its superinterfaces then Y...\"" as opposed to \""A and its superinterfaces then B...\"". ",1
+8," Thus this clarifies how the interfaces of superclasses are considered, while fixing the contradiction in the specification of interface search order.",1
+8, Created an attachment (id=122293) [details],4
+8, Fix v01,4
+8, Created an attachment (id=122297) [details],4
+8, Test case,6
+8, This is a test case using your richer example,1
+8, Fix and tests released to HEAD.,1
+8, Sounds reasonable.,6
+8, One tiny nit-pick though. ,5
+8, The last entry in the bullet list now reads:,0
+8,"     a breadth-first traversal of each class's interfaces in the order returned by &lt;code&gt;getInterfaces&lt;/code&gt; (in the example, X and its superinterfaces then Y and its superinterfaces) &lt;/li&gt;",4
+8, It might be more accurate to say:,5
+8,"     a breadth-first traversal of each class's interfaces in the order returned by &lt;code&gt;getInterfaces&lt;/code&gt; (in the example, X's superinterfaces then Y's superinterfaces)",5
+8," Since X and Y are not actually included in the \""traversal\"".",1
+8, Thanks.,6
+8," Good point, I have released this clarification to HEAD. ",2
+8, Thanks again.,6
+9, User-Agent:       Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7.12)Gecko/20050915 Firefox/1.0.7 (ax),4
+9, Build Identifier: Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7.12)Gecko/20050915 Firefox/1.0.7 (ax),4
+9," Firefox currently supports a wide number of stand alone e-mail applications (including it's own Thunderbird client), when an e-mail link is clicked on in Firefox.  ",0
+9, To the best of my knowledge it still does not support web based e-mail clients such as g-mail in this fashion.,0
+9," The idea is that if one prefers to use a web based e-mail account, they should have the option to configure firefox to log into that web based e-mail account and open a compose new message window.",5
+9," I understand this may require some colaboration with the popular web based e-mail services such as gmail and aim mail, but I think it would be worth the benifit.",5
+9, Reproducible: Always,0
+9, Something like the WebmailCompose extension?,3
+9," Other enhancement requests like this have been marked as dups of bug 11459, but I think that's wrong.  ",2
+9," As far as I can tell, bug 11459 is a combination of a design flaw specific to Seamonkey and a tangentially related enhancement request that also applies to Firefox, and nothing is happening there.",0
+9," It's sad that mailto: links don't work for most webmail users, especially since webmail is so popular.",0
+9," Webmail services can help give users programs that alter system mailto: behavior (e.g. the unofficial \""G-Mailto\"" and the official \""Gmail Notifier\""), and Firefox users can download the WebmailCompose extension, but i think it would be better if this were an option in Firefox itself.",5
+9," Not going to block on this, would be good to have this generically for feeds as well, but this may have to wait for Gecko 1.9",5
+9, Using Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9.1) Gecko/20090615,1
+9, Firefox/3.5,4
+9, Is this not now fixed?,3
+9, Indeed.,6
+10," Open a new image,",0
+10," create a layer much bigger than the image, and with a different aspect ratio.",0
+10, draw something on the drawable (using some colors),0
+10, make a selection selecting only some parts of your drawing,0
+10, use the channel mixer.,0
+10," The selection looks wrong in the plugin, and the plugin can even crash.",0
+10, This is due to the fact that the selection mask is taken with gimp_drawable_get_thumbnail_data () in the preview code.,0
+10," So if the layer and the image have different size, they are streched differently.",0
+10," Clearly what it is doing is bad, but what *should* it be doing?  ",3
+10," Should the preview follow the shape of the selection bounds, the image, or the drawable?",3
+10," On a big image, use crop tool on right, bottom or right bottom, click on resize.",5
+10, The active picture is then little than the layer.,5
+10, Using any tool with preview give a one pixel (or less ;) ) preview instead of the good one.,5
+10, Compute intersection between layer and active picture could be the solution...,5
+10," As far as I can see, there are two reasonable options, and either of them will require a substantial amount of fixing in the aspect preview code and the plugins that use it.  ",1
+10," (1) Show the entire drawable in an aspect preview, and mask changes using the current selection.",1
+10, (2) Show only the part of the drawable lying within the selection bounds. ,1
+10, It isn't clear to me which of them is better.,0
+10, Bumping to 2.4 since this is not likely to get fixed for 2.2,0
+10, Bumping to Future since this is not likely to get fixed for 2.4.,0
+10," Setting back to the 2.4 milestone since it's a crash and should, if possible, be looked at before the 2.4 release.",1
+10, Fixing this might make API changes necessary. ,5
+10, We need to look into this as soon as possible.,5
+10, It would help a lot if someone could attach an example XCF file to this bug report that shows the problem.,5
+10, Created an attachment (id=89354) [details],4
+10, bug156905.xcf.bz2 - a layer bigger than image,4
+10, Following assertion failed using Channel mixer on the layer.,0
+10, (channel_mixer:6701): LibGimpWidgets-CRITICAL **: gimp_preview_area_mask: assertion `mask != NULL' failed,4
+10, Doesn't channel mixer use GimpZoomPreview (not GimpAspectPreview)?,3
+10, Seems like both GimpZoomPreview and GimpAspectPreview have problems when steps in reporter's comment are taken.,5
+10, This one is nasty to track down.,0
+10," The example image has dimensions 377*233, the selection starts at x=125, y=97 and extends to the lower right corner of the image.",0
+10, The preview code then calls gimp_drawable_get_sub_thumbnail on the selection mask with the following coordinates:,0
+10,"   src_x: 117, src_y: 89, src_w: 268, src_h: 152",4
+10," which unsurprisingly fails, since src_x+src_w is bigger than the selection mask width.",0
+10," The source coordinates seem wrong to me and originate from gimp_zoom_preview_get_source_area(), but I have not yet tracked this down.",5
+10, Created an attachment (id=117704) [details],4
+10, GimpZoomPreview handle layer offsets,1
+10, This patch should fix GimpZoomPreview to handle layers with offsets with selections. ,1
+10, Area displayed in preview is intersection of layer and selection.,1
+10," If there are no objections, I could commit the patch.",2
+10, For GimpAspectPreview selection mask has to be applied for thumbnail of the whole drawable (selection can intersect partialy with drawable area).,1
+10, Please commit this. ,5
+10, It doesn't make sense to patch 2 [details].4 at this point. ,0
+10, So please do this in trunk only.,5
+10, 2008-09-02  Aurimas Juka  &lt;aurisj@svn.gnome.org&gt;,4
+10," &gt;-------* libgimp/gimpzoompreview.c (gimp_zoom_preview_draw_buffer),",4
+10, &gt;-------(gimp_zoom_preview_set_drawable): fixed GimpZoomPreview to handle,4
+10, &gt;-------layers with offsets and display intersection of layer and selection,4
+10, &gt;-------in the preview. (bug #156905),4
+11, When images are rescaled now the GIMP always defaults to linear scaling.,0
+11, Sometimes I want to do a bunch of images with cubic scaling. ,0
+11, It would be handy that the scale dialog just remembered the last setting and always present that one.,0
+11, The default interpolation routine can be choosen in the Preferences dialog.,5
+11," I just thought it would be easier if it just remembered the last setting, that way a newbie does not have to search trough the preferences, and it is handy if you want to scale a set of images in a different way as normally",5
+11, Jaap is right. ,6
+11, I didn't know about the preferences setting until I saw this bug report.,2
+11," This applies in general to options that the user can set without going into the preferences dialog: just remember the last setting, and there is no need for an entry in the preferences dialog.",5
+11," We would need an entry whether to save the last used setting, for the users who don't want this.",5
+11," Michael, I don't agree with having an extra entry whether to save the setting yes or no. ",2
+11, This would clutter the interface even more. ,2
+11, Because you then still need an entry in preferences and you need an extra entry in the scale dialog whether to save the last used setting. ,2
+11, Just always remembering the last setting is conceptually by far the easiest for new users. ,5
+11, Furthermore I think it's not really a problem if you have to change the setting now and then (In your case you also have to click once more to not save the setting). ,5
+11, And most of the times you will not change this setting.,5
+11," I agree that it is convenient to be able to set a default value from the place it is used (e.g., the Image-&gt;Scale dialog) instead of having to open the Preferences and find the corresponding option.",3
+11, This is very useful for those who are not familiar with all options available in the Preferences.,2
+11," However, I disagree with the proposal that the last setting should automatically become the default: I have set the default to Cubic (I might change it to Lanczos soon) and I expect it to be used all the time. ",2
+11," But from time to time, I scale up a bitmap image without interpolation.",2
+11, I don't want this to become the new default and give me bad results when I scale up another image two days later.,2
+11," So if there is a way to change the default from the Scale dialog (which is probably a good idea), then it should require an explicit action from the user.",5
+11," This could be a button like \""set default\"" or a checkbox \""remember this setting\"" next to the \""Interpolation type\"" dropdown list.",5
+11, &gt;&gt;Jaap is right. I didn't know about the preferences setting until I saw this bug report.,4
+11," LOL, me too.",6
+11," I think the suggestion for a \""set as defaults\"" button here is a good all-round solution that satisfies both camps.",5
+11, See this bug for request to deal with scaling units (percent/pixel) in the same way.,5
+11, http://bugzilla.gnome.org/show_bug.cgi?id=357424,4
+11," I think a \""set as defaults\"" button would clutter the UI. ",2
+11, This change remember the settings across dialog invocations.,1
+11, Closing as FIXED.,1
+11," (Please reopen if you strongly disagree, but please not without a non-ugly suggestion for a GUI)",5
+11, 2006-10-14  Michael Natterer  &lt;mitch@gimp.org&gt;,4
+11,     Remember the settings in the scale and resize dialogs for images and layers. ,5
+11," Fixes bug #164995, bug #316392, and bug #357424.",1
+11,     * app/dialogs/scale-dialog.h: removed GimpScaleCallback typedef.,4
+11,     * app/dialogs/dialogs-types.h: added it here.,4
+11,"     * app/dialogs/image-scale-dialog.[ch]: made the ImageScaleDialog struct private, return a GtkWidget* from image_scale_dialog_new() and use a GimpScaleCallback in the public API.",4
+11,"     * app/actions/actions-types.h: #include \""dialogs/dialogs-types.h\""",4
+11,"     * app/actions/image-commands.c: changed according to image scale dialog changes. Remember the scale dialog's unit (if it is \""percent\"") and interpolation type across dialog invocations.",4
+11,"  Also remember the resize dialog's unit (if it is \""percent\"").",5
+11,     * app/actions/layers-commands.c: remember scale and resize dialog stuff as in image-commands.c,4
+12," 1. Open a large grayscale image of your choice (e.g. larger than 2000*2000 pixels, maybe a scan result from your scanner)",1
+12," 2. Use \""Tools/Color Tools/Threshold\"" to apply some threshold choosen arbitrarily. ",1
+12, This tool is pretty fast.,1
+12," 3. Now you have a 8bit grayscale image, which actually consists only of color values \""0\"" and color values \""255\"".",0
+12,  ,6
+12," Converting it to a 1bit black&white image should be a very fast operation (replacing 0 (8bit) by 0 (1bit) and replacing 255 (8bit) by 1 (1bit)), but it is not:",1
+12," 4. Choose \""Image/Mode/Indexed...\"", and there:",1
+12," 4.1 Colormap: \""Use black and white (1-bit) palette)\"" (this should be the fastest option possible)",1
+12," 4.2 Dithering: \""none\"" (this should be the fastest option possible)",1
+12," 4.3 Now hit \""OK\""",1
+12," 5. The conversion will work, but it will take many seconds. ",0
+12," For an example image of \""2460*3483\"", it takes 34 seconds on my computer (while applying the Threshold tool, which basically does the same, only needs maybe 2 seconds).",0
+12," This slow speed is not acceptable for interactive image processing, and this slowness is not necessary at all.",0
+12," Indeed it is very slow, so I will confirm this bug report.",2
+12," There is, however, a workaround.  ",0
+12," I found with a little experimentation that if you use the \""Optimal Palette\"" option for step 4.1, then the conversion occurs in a flash, literally a fraction of a second for me.",1
+12," This happens, I think, because if you use this option, by the time the algorithm reaches the stage of actually converting the image, it has built a color histogram and \""knows\"" that there are exactly two colors in the image, and can assign colors directly, without having to test whether black or white is the best match for each pixel.",1
+12," Because of the existence of this workaround, I am going to lower the severity, but this *is* something that should be looked into.",2
+12, Created an attachment (id=38911) [details],4
+12, Image where to 1bit conversion is either slow or buggy (with GIMP 2.2.4),0
+12, That's odd. ,6
+12, I just tried to use your suggested workaround and was happy that the conversion was as fast one should expect.,2
+12," However, the conversion was plainly wrong, it produced an image which was just black (the input image was nearly white).",2
+12, I'm attaching a test case image. This may be a related bug.,5
+12, Do following on the atached image:,5
+12," 1. Choose \""Image/Mode/Indexed...\"", and there:",5
+12," 1.1 Colormap: optimal palette (wether 2 oder 256 colors, it does not matter)",5
+12," 1.2 Dithering: \""none\"" (but I think it does not matter)",5
+12, Interesting -- clearly the generation of an optimal palette is not done correctly for this image.,2
+12," Because this is a different issue, I am going to open a different bug report for it -- using your image as example, if you don't mind.",5
+12," In any case, I've found a solution to the original problem, I think.",1
+12, I found a very simple change that gives a major speedup when converting grayscale images to the mono palette.,1
+12," It's now at least as fast as the Threshold tool, so I'm going to resolve this bug as FIXED.  ",1
+12," Still just as slow for RGB images, though.  ",0
+12, Committed to both branches:,0
+12, 2005-03-18  Bill Skaggs  &lt;weskaggs@primate.ucdavis.edu&gt;,4
+12," 	* app/core/gimpimage-convert.c:  when converting grayscale to mono, treat the palette as gray rather than rgb, giving 	more than tenfold speedup.  ",1
+12, Fixes bug #170801.,4
+12, The new problem is described in bug #170825,0
+12, I'd be pleased if you used my test case image. :-),2
+12," Thank you for fixing this bug so fast, so I just need to wait for the next release. ",6
+12," (Building for Windows would be rather messy, so I try to be patient...)",0
+12, I'm interested in seeing the patch.  ,2
+12, If you can't attach it then what revision of gimpimage-convert.c contains the fix?,2
+12, Revision 1.156. Here is the patch:,1
+12, --- gimpimage-convert.c 27 Feb 2005 14:03:50 -0000      1.155,4
+12, +++ gimpimage-convert.c 18 Mar 2005 17:34:34 -0000      1.156,4
+12," @@ -4057,7 +4057,6 @@ initialize_median_cut (GimpImageBaseType",4
+12,          },4
+12,        if (palette_type == GIMP_WEB_PALETTE  ||,4
+12, -          palette_type == GIMP_MONO_PALETTE ||,4
+12,            palette_type == GIMP_CUSTOM_PALETTE),4
+12,          {,4
+12,            switch (dither_type),4
+12, Thanks.,6
+12, That's interesting.  ,6
+12," I expect it to yield poorer results though, to some extent (probably most obviously darker, or lighter, in mid-greys, that is a damaged gamma), because the greyscale colour-matching and error-quantifying is in a comparatively non-perceptually-uniform space (that's half the reason why it's faster, though it's not as big a quality difference in a greyscale source as an RGB source).",0
+12, Were side-by-side comparisons done?  ,3
+12," I hope so, though I could do some here if anyone cares.",2
+12, I don't think anyone has done side-by-side comparisons.,2
+12," differences, but not so strong that I'm really going to lose any sleep.",2
+12, Note that the analysis in comment #1 is correct; ,2
+12," the 'optimal' palette finder does a first pass to see if there are already a suitable number of colours, and then knows that it can skip both the expensive quantization and dithering stages.",5
+12," The 'mono' palette option doesn't even bother to start this pre-pass because it could only possibly pay off the extra effort if the entire image is pure black and pure white, which is expected to be a comparatively rare occurance.",1
+12," &gt; The 'mono' palette option doesn't even bother to start this pre-pass because it could only possibly pay off the extra effort if the entire image is pure black and pure white, which is expected to be a comparatively rare occurance.",4
+12," I don't think that this operation is so rare, because for getting an \""optimal distribution between black and white\"" for grayscale images (for example: you want to generate faximilies the receiver actually is able to read), you use the",2
+12," \""threshold\"" operation, and then a \""convert to 1bit\"" operation to actually adjust the internal memory requirements.",2
+12," So at least for me, this chain of operations is rather frequent.",2
+12," &gt; and then a \""convert to 1bit\"" operation to actually adjust the internal memory requirements.",4
+12," If you mean GIMP's internal memory requirements you're wasting your time -- all Indexed images are 8/16bpp internally (the same as greyscale images), so you're not saving any memory (instead you may be using quite a lot more, for various",5
+12, reasons).,6
+12, I mean OpenOffice's internal memory requirements. ,2
+12," For having 10 or 20 fax pages in one OOo document, it quite makes a difference wether they are 8bit or 1bit.",2
+13, Please describe the problem:,6
+13," When going to File-&gt;Acquire-&gt;Screenshot in the Windows port of the development build GIMP 2.3.11, firstly there are two different entries \""Screen Shot\"" and \""Screenshot\"" and secondly, functionality to grab only a portion of the screen is broken.",0
+13," There is no option to \""Select a Region to Grab\"" when the user chooses \""Screen Shot.\""",0
+13," However, this option exists in the dialogue box that appears after the user selects :Screenshot.\"" ",0
+13," However, the functionality does not work, even after selecting a long delay period.",0
+13," Instead, the whole screen is captured each time.  ",0
+13," I was expecting the mouse cursor onscreen to change to \""crosshairs\"" or something similar to allow me to select the region I required.",0
+13, Steps to reproduce:,0
+13, 1. Launch GIMP 2.3.11 Development for Windows on a Windows 2000 platform.,0
+13," 2. Got o File-&gt;Acquire-&gt;Screenshot.  (Note the two different entries for \""Screen Shot\"" and \""Screenshot\"".)",0
+13," 3. Tick \""Select a Region to Grab.\""  ",0
+13, 4.  Set the delay.,0
+13," 5.  Click \""Grab.\""",0
+13, Actual results:,0
+13, The whole screen is captured each time.,0
+13, Expected results:,0
+13," The ability to select a portion of the screen would be available, probably via mouse click-and-drag functionality.",0
+13, Does this happen every time?,3
+13, Yes.,6
+13, Other information:,6
+13," (I presume the two entries for screenshots under the submenu are there in order to test old and new code, by the way but I just noted it in case there was an issue.)",5
+13, D. Le Sage,6
+13, APF,6
+13," Hobart, Tasmania",6
+13, We know that the port of the screenshot plug-in for Windows is incomplete.,2
+13, What's this bug-report about? ,3
+13, Do you want to contribute the missing bits or do you want us to disable the plug-in for the Windows platform? ,3
+13, We are waiting for a volunteer to implement the missing functionality for more than a year now.,5
+13, Perhaps it's about time to drop support for the Win32 platform completely.,5
+13," Sven,",6
+13, The bug report was to alert you in case you did not know it was broken.  ,2
+13, You are obviously aware it is incomplete.  ,2
+13, Perhaps you should disable it to prevent more questions from users.,5
+13, I am not a programmer so I cannot implement the functionality.  ,2
+13, I am trying to do my part by reporting issues for you.,2
+13, You have complained before about how short of volunteers you are.  ,5
+13," If this is the case, perhaps it is a very good idea to drop support for Win32 and consolidate on making sure the *Nix implementation is as good as possible. ",5
+13, Supporting Win32 is probably just draining more resources away.,2
+13, IIRC Tor is working on this.,5
+13," apf, you are using a development version. ",5
+13, Of course there are incomplete and even broken features in there. ,5
+13," If you are just a user, you should be using the stable release.",5
+13, Tor said that it is impossible to implement the look and feel of the X11 screenshot plug-in on the Windows platform. ,1
+13, He suggested that we stick with Winsnap for the Win32.,5
+13, 2006-10-27  Sven Neumann  &lt;sven@gimp.org&gt;,4
+13,     * configure.in,4
+13,     * plug-ins/common/plugin-defs.pl,4
+13,     * plug-ins/common/Makefile.am: reverted changes from 2006-04-06 and build screenshot plug-in optionally again. ,4
+13, Fixes bug #364852.,4
+13,     * plug-ins/common/mkgen.pl: reverted addition of 'extralibs' parameter that was introduced for the screenshot plug-in only.,4
+14, Please describe the problem:,6
+14, When I try to export reports that contain graphs gnuCash just creates an empty html file.,0
+14, Also it is not clear that the export can only do html files. ,0
+14, The first time I ran export I triped to save as .jpg and it created a html file named foo.jpg,0
+14, Steps to reproduce:,0
+14, 1. In gnuCash go on reports and create any report that contains a graph,0
+14, 2. In the report window click on Export ,0
+14," 3. Save export to \""foo.html\""",0
+14, Actual results:,0
+14, An empty HTML file is saved,0
+14, Expected results:,0
+14, A HTML file with a nice graph ,0
+14, Does this happen every time?,3
+14, Yes,6
+14, Other information:,6
+14," Yes, that's true -- the current graphing code, which uses the graphical library \""Guppi\"" which is a dead project, can only produce the on-screen diagrams *and* print these to postscript, but it cannot export these diagrams into pictures that are embedded in a HTML-file. ",0
+14," In other words, you can only print the diagrams to postscript but not export them to HTML. ",5
+14," This is not going to change before the gnome2 port is completed, because we need to switch to a different graphical library before anything related to this can be changed. ",1
+14, See http://gnomesupport.org/wiki/index.php/GnuCashPortingStatus for the porting status.,5
+14, Definitely keep it as a reminder.,5
+14," We should be able to coax anything into giving us a PNG; GOG supports SVG export, too.  ",5
+14, But it looks like gtkhtml doesn't support saving &lt;object /&gt; data.,2
+14, Because it sucks ass.,6
+14, This is still valid for me with version 2.0.4 on opensuse 10.2. ,0
+14, This is a real problem not to be able to export these reports. ,0
+14," This shouldn't be tagged 'enhancement' anymore, but brought up higher.",0
+14, What's the status on this? ,3
+14, Thank you.,6
+14, (In reply to comment #4),4
+14, &gt; This is still valid for me with version 2.0.4 on opensuse 10.2. ,4
+14, &gt; This is a real &gt; problem not to be able to export these reports. ,4
+14," &gt; This shouldn't be tagged 'enhancement' anymore, but brought up higher.",4
+14, &gt; What's the status on this? ,4
+14, There's no change on this.,0
+14," I wonder if the more recent gtkhtml supports getting at &lt;object /&gt;s, or if the more recent GOG makes it trivial to create a PNG.",5
+14," In any case, I hesitate to do so, but I've raised the severity to Normal -- a minor part of the component (Reports, export, graphs) does not work.",5
+14," (FWIW, Fred, it's not going to get fixed any faster at Normal than at Enhancement.)",2
+14," I can confirm this using GnuCash 2.0.5 on Ubuntu 7.04, feisty fawn...and I can confirm that it's frustrating....",2
+14," 2.2.8, still doesn't have this needed feature... Frustration also confirmed.",0
+14," GtkHtml provides a callback when it encounters a &lt;object&gt; tag, and gnc-html then calls gog to create the image as a GdkPixbuf and then embed it in the web page.  ",5
+14," For the webkit port, there is no &lt;object&gt; callback.  ",0
+14," Therefore, gnc-html-webkit pre-parses the html string, finds the &lt;object&gt; tag, calls gog with the parameter values from the &lt;object&gt; to create a GdkPixbuf, then converts the pixels to png/base64 and embeds the html &lt;img&gt; in the original",1
+14, where the &lt;object&gt; was.  ,1
+14, Result is a graph that displays in webkit.  ,1
+14," In addition, gnc-html-webkit saves the html passed to webkit and handles the export itself by writing that html to a file.",1
+14, This fix is targetted for 2.4.  ,6
+14, I can also convert gnc-html-gtkhtml to use these two features (convert graph to embedded &lt;img&gt; and do the export rather,1
+14, than getting gtkhtml to do it) for those who can't build 2.4 with webkit.,5
+14, It turns out that gtkhtml (at least the version I have on Ubuntu 9.04) doesn't support inline images.  ,0
+14," Therefore, this will only be possible using webkit.",1
+14, The gnucash-1.8.x series is no longer developed. ,1
+14," We may keep this enhancement request as a reminder, though.",5
+15," Using the current gvfs svn and nautilus 2.22.0, when doing a dnd from a directory on a proftpd server nautilus returns a file not available error. ",0
+15, It does the same when trying to delete the directory. ,0
+15, Copying the same directory using mirror in lftp works correctly,0
+15, i get this too.,6
+15, yup me too,6
+15, *** Bug 524421 has been marked as a duplicate of this bug. ***,4
+15," We're getting this in openSUSE too, and it seems to happen with all kinds of FTP servers.",0
+15, The openSUES bug is,0
+15, https://bugzilla.novell.com/show_bug.cgi?id=382360,4
+15, This is caused by broken backends. ,0
+15, Any attempts to open or copy/move a directory should fail with G_IO_ERROR_IS_DIRECTORY. ,0
+15, GIO functions and Nautilus rely on that.,0
+15, Fix for gvfs-smb is now in trunk and gnome-2-22 branch. ,1
+15, Working on FTP fix right now.,1
+15, Created an attachment (id=111807) [details],4
+15, gvfs-ftp-read-directory.patch,4
+15, Proposed patch. ,6
+15, Introducing new system of handling error 550 messages based on Benjamin's idea. ,1
+15, So far only simple check if the target is directory has been implemented.,1
+15," Please review the patch, I especially don't like keeping references to GVfsBackendFtp and processed file in the FtpConnection object but it is the easiest way to do it.",5
+15," The patch gets the gist of what I want, but it looks ugly in places. ",5
+15, Here's what I think on how to solve those:,2
+15," My idea was that the error handlers should be implemented with simple ftp_connection_send() commands, that set errors automatically. ",5
+15, So the is_directory handler would look something like this:,5
+15, static void,4
+15," error_550_is_directory (FtpConnection *conn, const FtpFile *file)",4
+15, {,4
+15,"   guint response = ftp_connection_send (conn,  RESPONSE_PASS_500, \""cwd %s\"", file);",4
+15,   if (response == 550),4
+15,     {,4
+15,"       g_set_error (&conn-&gt;error, G_IO_ERROR,  G_IO_ERROR_IS_DIRECTORY, _(\""File is a directory\""));",4
+15,     },4
+15,   else if (STATUS_GROUP (response) == 5),4
+15,     {,4
+15,"       ftp_connection_set_error_from_response (conn, response);",4
+15,     },4
+15, },4
+15, So we'd have a bunch of error handlers named error_550_$ERROR_WE_CHECK() like error_550_not_found or  error_550_permission_denied that do some ftp sending magic to figure out specific things.,5
+15," While writing the above code, it occured to me that we might want to have a new flag \""RESPONSE_PASS_550\"" just for the 550 error code, which would help in quite some cases and make the above function look like this:",5
+15, static void,4
+15," error_550_check_directory (FtpConnection *conn, const FtpFile *file)",4
+15, {,4
+15,"   guint response = ftp_connection_send (conn,  RESPONSE_PASS_550, \""cwd %s\"", file);",4
+15,   if (response == 550),4
+15,     {,4
+15,"       g_set_error (&conn-&gt;error, G_IO_ERROR,  G_IO_ERROR_IS_DIRECTORY, _(\""File is a directory\""));",4
+15,     },4
+15, },4
+15," I also think that we want a seperate ftp_connection_send_and_check function, that does the job of doing special 550 checks, as there's a lot of cases where those aren't needed. ",2
+15, The code would roughly look like this:,5
+15," typedef void (* Ftp550Handler) (FtpConnection *conn, const FtpFile *file);",4
+15, static void,4
+15," ftp_connection_check_file (FtpConnection *conn,  const Ftp550Handler *handlers, const FtpFile *file)",4
+15, {,4
+15,   while (*handlers && !ftp_connection_in_error (conn)),4
+15,     {,4
+15,"       handlers (conn, file);",4
+15,       handlers++;,4
+15,     },4
+15, },4
+15, static guint,4
+15," ftp_connection_send_and_check (FtpConnection *conn, ResponseFlags flags, const Ftp550Handler *handlers, const FtpFile *file,  const char *format, ...) G_GNUC_PRINTF (5, 6)",4
+15, {,4
+15,   va_list varargs;,4
+15,   guint response;,4
+15,   /* check that there's no 550 handling used - don't allow bad use of API */,4
+15,"   g_return_val_if_fail (flags & | == 0, 0);",4
+15,"   g_return_val_if_fail (handlers != NULL, 0);",4
+15,"   g_return_val_if_fail (file != NULL, 0);",4
+15,"   va_start (varargs, format);",4
+15,"   response = ftp_connection_sendv (conn,",4
+15,"                    flags | RESPONSE_PASS_550, format, varargs);",4
+15,   va_end (varargs);,4
+15,   if (response == 550),4
+15,     {,4
+15,"       ftp_connection_check_file (conn, handlers, file);",4
+15,       response = 0;,4
+15,     },4
+15,   return response;,4
+15, },4
+15," This also solves the problem of having our 550 handling move into the response codes, which looks a bit unfortunate API wise.",1
+15," And we get rid of adding more members to the FtpConnection struct, especially those that don't belong there.",5
+15, Some smaller things:,6
+15," - The function was called \""error_550_check_directory\"". ",5
+15," That's a somewhat bad choice for a name, as I don't know if it checks whether the file is or is not a directory.",5
+15, - Please change the default error code for 550 to G_IO_ERROR_FAILED. ,5
+15," \""Operation failed\"" sounds much better than \""File unavailable\"". ",5
+15," And it tells us where we miss 550 checks: Whenever we get \""FAILED\"" :)",5
+15," - Your patch includes the \""LIST -a\"" change for bad directory listings.",5
+15, Created an attachment (id=112474) [details],4
+15, gvfs-ftp-read-directory-2.patch,4
+15," Modified patch, fixing all issues noted in the previous comment.",5
+15, From a quick review the patch looks pretty much like I imagined it. ,2
+15," And before I forget it: error_550_is_directory() checks for 250, not 550.",2
+15, Commited slightly modified patch to trunk and stable 2.22 branch. ,1
+15, This fixes recursive copy of directory structure in Nautilus.,1
+15," The delete issue reported in the first post might be related to bug #528347, where client apps using GIO/GVFS are unable see dot-files which are blocking directory removal as it's not empty. ",1
+15, Otherwise deleting whole directory structure works fine in Nautilus and backend reports G_IO_ERROR_NOT_EMPTY correctly.,1
+16, According to Havoc:,6
+16,"   If you need struct fields in any widget, please file a bug report,  they should never be required to use a widget.",5
+16," Accordingly, I took a look at the places where the latest PyGtk wrappers directly access widget data attributes to provide needed functionality.  ",5
+16," I found 43 examples, identified in the table below.  ",5
+16," (Of course, there may be more that PyGtk doesn't use or expose.)  ",0
+16, Most of these data attributes are accessed directly to provide them to the Python programmer.  ,0
+16, I assume that means they would also have to be accessed directly by the C programmer.,2
+16,     GTK_ADJUSTMENT                  lower,4
+16,     GTK_ADJUSTMENT                  page_increment,4
+16,     GTK_ADJUSTMENT                  page_size,4
+16,     GTK_ADJUSTMENT                  step_increment,4
+16,     GTK_ADJUSTMENT                  upper,4
+16,     GTK_ADJUSTMENT                  value,4
+16,     GTK_BIN                         child,4
+16,     GTK_CHECK_MENU_ITEM             active,4
+16,     GTK_CLIST                       columns,4
+16,     GTK_CLIST                       focus_row,4
+16,     GTK_CLIST                       row_list,4
+16,     GTK_CLIST                       rows,4
+16,     GTK_CLIST                       selection,4
+16,     GTK_COLOR_SELECTION_DIALOG      cancel_button,4
+16,     GTK_COLOR_SELECTION_DIALOG      colorsel,4
+16,     GTK_COLOR_SELECTION_DIALOG      help_button,4
+16,     GTK_COLOR_SELECTION_DIALOG      ok_button,4
+16,     GTK_COMBO                       entry,4
+16,     GTK_COMBO                       list,4
+16,     GTK_CURVE                       num_points,4
+16,     GTK_DIALOG                      action_area,4
+16,     GTK_DIALOG                      vbox,4
+16,     GTK_FONT_SELECTION_DIALOG       action_area,4
+16,     GTK_FONT_SELECTION_DIALOG       apply_button,4
+16,     GTK_FONT_SELECTION_DIALOG       cancel_button,4
+16,     GTK_FONT_SELECTION_DIALOG       fontsel,4
+16,     GTK_FONT_SELECTION_DIALOG       main_vbox,4
+16,     GTK_FONT_SELECTION_DIALOG       ok_button,4
+16,     GTK_GAMMA_CURVE                 curve,4
+16,     GTK_GAMMA_CURVE                 gamma,4
+16,     GTK_GAMMA_CURVE                 gamma_dialog,4
+16,     GTK_GAMMA_CURVE                 gamma_text,4
+16,     GTK_GAMMA_CURVE                 table,4
+16,     GTK_LIST                        selection,4
+16,     GTK_NOTEBOOK                    tab_pos,4
+16,     GTK_STYLE                       black,4
+16,     GTK_STYLE                       white,4
+16,     GTK_TEXT_BUFFER                 tag_table,4
+16,     GTK_TOGGLE_BUTTON               draw_indicator,4
+16,     GTK_WIDGET                      allocation,4
+16,     GTK_WIDGET                      parent,4
+16,     GTK_WIDGET                      style,4
+16,     GTK_WIDGET                      window,4
+16," Thanks, this is helpful. ",6
+16," Some of them are bogus and already  have accessor functions, I believe:",2
+16, GTK_BIN                         child,4
+16, GTK_CHECK_MENU_ITEM             active,4
+16, GTK_TEXT_BUFFER                 tag_table,4
+16," Also, most of them are for deprecated widgets. ",5
+16, But there are many there we should probably have functions for.,5
+16," Adding API keyword, but putting on future milestone.",5
+16," When considering accessor functions, you might also want to consider raising the API up to a bit higher level.  ",5
+16," For example, the Combo widget should probably have its own value-changed signal and direct access to the underlying entry and list widgets should be deprecated with some higher level functions written for the Combo widget to get at necessary functionality.  ",5
+16," Since the GtkList widget is already deprecated, this stuff is going to break in applications someday anyway.",5
+16," No kidding about the breakability in the combo box: this is already pretty much broken in GTK-- (C++ binding), where they use a different implementation for the (deprecated) list, which basically makes it impossible to access list data. ",5
+16, A change in the GTK+ API to allow access to the list items through a function would make this a whole lot more usable.,5
+16, Suggestion:,6
+16, Make the list in the combo a GList. ,5
+16, This would also make working with the combo easier... ,5
+16, Not sure if there's a good way of handling arbitary  widgets with associated text without creating some sort of ListItem,5
+16, (deprecated) replacement...,6
+16, The ongoing gseal work is finally taking care of this.,1
+17," Currently apps use gnome_help functions to show help files, but gnome_help is part of the deprecated gnome_help",0
+17, See also GNOME goal proposal,5
+17, http://live.gnome.org/action/show/GnomeGoals/RemoveGnomeOpenGnomeHelp,4
+17, Created an attachment (id=105668) [details],4
+17, Patch adding gtk_show_uri and gtk_show_help to GTK+,1
+17, The gtk_show_help function is missing |return ret;|.,1
+17, You forgot to add the new funcs to gtk/gtk.symbols .,5
+17, + * modify it under the terms of the GNU Lesser General Public,4
+17, + * License as published by the Free Software Foundation; either,4
+17," + * version 2 of the License, or (at your option) any later version.",4
+17," There is no \""Lesser GPL version 2\"". ",1
+17, It's the Lesser GPL version 2.1 (or the Library GPL version 2).,1
+17, Somehow I feel that gtk_show_help() is too GNOME oriented to be included in this form. ,2
+17, I have been told that gtk_show_uri() will work nicely on the major supported platforms.,2
+17, This is hwoever not the case for gtk_show_help(). ,0
+17," Since the functionality of gtk_show_help() can be easily implemented on top of gtk_show_uri(), it should be sufficient to provide gtk_show_uri() for now.",5
+17, Created an attachment (id=105671) [details],1
+17, Updated patch. Adding ret and gtk symbols,1
+17," Christian, I copied the license from other files in GTK+.",1
+17, I opened about 5 to 6 files and they are the same. ,0
+17, I guess it's a better idea to change all licenses in one go,2
+17, What's the consensus on this?,3
+17, Can I commit gtkshow.c to gtk+ when I remove gtk_show_help?,3
+17, Update your patch to remove gtk_show_help() to start with.,5
+17, Created an attachment (id=106302) [details],4
+17, Patch removing gtk_show_help,1
+17, Can one of the maintainers decided what to do with this patch? Thanks,3
+17," gtk_show_uri allows a NULL parent, but that is not multi-head safe.",1
+17, Why not take a mandatory GdkScreen argument since the function couldn't care less about the parent widget beyond its screen?,5
+17, I can make it such that the parent has to be set mandatory.,1
+17, Having a GtkWidget *parent saves calling a gtk_widget_get_screen everytime you do a gtk_show_uri,1
+17, What's the opinion on this of others?,3
+17," I don't think the parent should be mandatory, because there are situations",2
+17, where they may not be a parent at all.,2
+17," A mandatory parent would be bad, as Ross explained in comment #11. ",2
+17, IMO the best solution is to change the function to take a GdkScreen instead of a parent widget. ,5
+17, Shouldn't hurt much to call gtk_widget_get_screen().,5
+17, Created an attachment (id=107888) [details],4
+17, Updated gtk_show_uri patch now using a GdkScreen as input,1
+17, Thanks for you comments. ,6
+17, Any more comments?,3
+17, Ping. Can above patch be applied?,3
+17, Can one of the maintainers make a decision about this patch.,3
+17, Thanks,6
+17, Some comments: ,6
+17," - Wrt to the parent issue, I think the function should accept NULL there. ",5
+17,"   Being forced to call gdk_widget_get_screen() is annoyance, when  GdkAppLaunchContext handles unset screen already.",5
+17, - The documentation needs to go in some more detail about what kind of 'uri' this function accepts. ,5
+17," There is no standard for this, unfortunately, and the gnome-vfs-&gt;gio transition has unearthed a number of problems due to this.",5
+17, - I'd be interested in a function that mounts the volume before opening it.,5
+17, This is what e.g. the panel needs (see bug 529243 ). ,5
+17," That could be a separate function, or gtk_uri_show could take flags.",5
+17, Created an attachment (id=109974) [details],4
+17, Updated patch. GdkScreen can be NULL,1
+17," Matthias, thanks for the review. ",6
+17, I've updated the patch with your first two comments.,1
+17, About the third comment (the auto mounting). ,6
+17, Why would gtk_show_uri need extra flags for this? ,3
+17, We could add code that just tries to mount if this is necessary. ,5
+17, Your patch in bug 529243 uses libgnomeui/gnome-password-dialog.h which can't be used in gtk+,2
+17, What do you want to do? ,3
+17, Commit this patch (quite some apps could reduce their dependency on libgnomeui and friends already) and later on add the mounting part,5
+17, Matthias: being forced to call gdk_widget_get_screen is a good thing as it avoids multiscreen bugs.  ,5
+17," If GdkAppLaunchContext handles it, as you say, that sounds like that ought to be fixed too.  ",2
+17, There really is no way the gdk/gtk layer can know what screen should be used.,2
+17," OK, this bug report has gotten silly.&lt;/monty-python&gt;",2
+17," In 99% of use cases, the user interacts with some widget, and as a result, the program wants to show a URI on the same screen as that widget.",5
+17," In 99% of the remaining 1% of use cases, the program has no opinion at all about what screen to show the URI on (eg, gnome-open), and so it's going to pass NULL for parent regardless of whether parent is a GtkWidget or a GtkScreen. ",5
+17," (Or in the mandatory GtkScreen case, it would always call gdk_screen_get_default().)",2
+17," Given that this is a 10-line function, it seems silly to make its interface less convenient for 99% of users just so it can cover an additional 0.01% of use cases. ",5
+17," Assuming there actually are programs that need to show URIs on specific screens that do not correspond to any live widget, the developers of those programs can just cut and paste the gtk_show_uri source and change it accordingly.",2
+17, accordingly.,6
+17, Jaap: the way to handle mounting in GTK+ is to use a GtkMountOperation. ,1
+17," I'm not 100% happy with the single-function header gtkshow.h, but I don't really have a better alternative.",2
+17," It is probably ok to commit it in this form now, we'll figure out the mounting later.",2
+17, Thanks for the review. It's now committed,5
+17, 2008-05-25  Jaap A. Haitsma  &lt;jaap@haitsma.org&gt;,4
+17,     reviewed by: Matthias Clasen,4
+17,     * gtk/Makefile.am:,4
+17,     * gtk/gtk.h:,4
+17,     * gtk/gtk.symbols:,4
+17,     * gtk/gtkshow.c: (gtk_show_uri):,4
+17,     * gtk/gtkshow.h:,4
+17,     Add gtk_show_uri to make showing uris really easy. ,1
+17, Fixes bug #514396,4
+18, Created an attachment (id=87317) [details],4
+18, the error report,6
+18," I'm using the SWT library, ran the \""Hello World\"" example:",0
+18, import org.eclipse.swt.widgets.*;,4
+18, public class SWTExperiment {,4
+18,         public static void main (String [] args) {,4
+18,                 Display display = new Display ();,4
+18,                 Shell shell = new Shell(display);,4
+18,                 shell.open ();,4
+18,                 while (!shell.isDisposed ()) {,4
+18,                         if (!display.readAndDispatch ()) display.sleep ();,4
+18,                 },4
+18,                 display.dispose ();,4
+18,         },4
+18, },4
+18," and SWT fails to load, it always exits with java has exited due to signal 4 (SIGILL).",0
+18," I see the window flash open, then immediately it crashes.",0
+18, There is nothing in the logs.,0
+18, when i open the resulting jar with the jar launcher I get the crash report which I attached.,0
+18," also, I ditched the new version and tried 3.2.2 and it worked",0
+18," On my Mac, running OS X 10.5.2, I successfully ran the hello world example, from the command line, using the SWT from R3.4 M6. ",5
+18, Can you try that version and see if it fails for you? ,3
+18," Also, can you run     java -version   and let us know what it prints?",3
+18, this is the output from java -version,5
+18," java version \""1.5.0_13\""",4
+18," Java(TM) 2 Runtime Environment, Standard Edition (build 1.5.0_13-b05-241)",4
+18," Java HotSpot(TM) Client VM (build 1.5.0_13-121, mixed mode, sharing)",4
+18," I'm running Mac OS X 10.4.11, so still on Tiger.",0
+18," I ran it again with the R3.4 M6 (including swt-debug.jar) and i'm getting the same issue, seeing the frame and then crashing with SIGILL.",0
+18, Adding Steve to increase the visibility.,5
+18, How are you launching your app? ,3
+18," If you are launch from the command line, are you using the -XstartOnFirstThread option? ",5
+18, (http://www.eclipse.org/swt/faq.php#carbonapp),4
+18, I'm running on leopard w/o any problems. ,5
+18, I'll try Tiger.,5
+18," Sorry, I could not reproduce this on Tiger either. ",2
+18," I tried running in Eclipse, from command line, and exporting a project as a runnable jar from Eclipse. ",5
+18, No crashes.,2
+18, Please provide detailed instructions on how you are creating your project and running you code.,5
+18, I created it using xcode 2.5 on tiger.  ,5
+18," I tried using eclipse but it would not build from source for some reason, so thats how i ended up on xcode.  ",0
+18," There are no command line arguments except -cp SWTexperiment.jar SWTexperiment, which doesn't pertain to this.  ",0
+18, I just tried adding the -XstartOnFirstThread option and everything worked fine.,1
+18,"  No crashing, everything is wonderful. ",1
+18,  what does this option do?,3
+18, http://www.eclipse.org/swt/faq.php#carbonapp,4
+19, Group title is not taken into account by Window-Eyes 4.5.,0
+19, The group title should be pronouced before radio buttons or other controls.,0
+19," It is not, this is bug since blid users cannont know what the group content is dealing about.",0
+19, Interesting. ,7
+19," Both Window-Eyes and JAWS will read a Group title IF the Group has a single child that does not have an obvious name, for example, a text or a list or a combo box.",0
+19," But neither screen reader will read a Group title if it groups a set of radio buttons or check boxes, say. ",0
+19," (Or, I assume, if it is surrounding something that has an obvious label to read instead, like a button, and if the child control takes focus).",0
+19," We have several dialogs - notably, the search and find/replace dialogs, that have groups with radio/checkbox children. ",0
+19, The screen readers do not read the group titles in these dialogs.,0
+19, I will bring this to the attention of the screen reader developers.,5
+19," For now, an extreme, but sort-of useable work-around in Window-Eyes is to tell it to read every control in a newly-opened dialog. ",5
+19, You can do this with:,5
+19, Global -&gt; Verbosity -&gt; Activated... Entire Window if Dialog,4
+19, CCing Frank and Lin.,4
+19, Here are 2 examples of eclipse dialogs where a group title is not read:,5
+19, 1) Click on the flashlight (Search) tool in the main toolbar. ,0
+19, Click on any of the tabs in the notebook. ,0
+19," All of the pages have a \""Scope\"" group. ",0
+19," Some of the pages have a \""Search For\"" group or a \""Limit To\"" group. ",0
+19, None of these titles are read by JAWS.,0
+19," 2) Open an editor on any file, and then select Edit -&gt; Find/Replace... (or type ctrl+F) to get the Find/Replace dialog. ",0
+19," The \""Direction\"", \""Scope\"", and \""Options\"" group titles are never read.",0
+19," I think the best thing would be if these were read when one of the radio or checkbox controls gets focus (i.e. when the dialog is activated, and when the user tabs to a new group or clicks on a control in another group.",5
+19," Today, Frank and Lin tested with JAWS 5.0, 5.1 and 6.0 beta, we found both the dialogue from flashlight and Find/Replace from the Edit group titles are spoken correctly.",1
+19, Created an attachment (id=14333) [details],4
+19, GroupTests.java,4
+19," It is not working for me, so either I didn't make the problem clear enough, or you have some JAWS settings set that I do not have set. ",0
+19," I just installed JAWS 5.1, and in the installation process, it asked if I wanted to keep settings from my previous JAWS version. ",0
+19," I said \""No\"", because I want my JAWS 5.1 to be \""out-of-the-box\"". So I have NO settings in my JAWS 5.1, so no surprises.",0
+19, I will attach a little code snippet here that shows the problem very simply.,0
+19," Copy the attachment into your snippets directory, refresh your snippets project, select GroupTests.java, and Run -&gt; Java Application. ",0
+19," What I hear when I tab or down/up arrow is \""green\"" or \""blue\"", depending on who has focus.",0
+19," What I want to hear is \""Foreground - green\"" and \""Background - blue\"".",0
+19, Created an attachment (id=14443) [details],4
+19, GroupTests.java,4
+19," Sorry - Bugzilla defaulted to saving the java file as octet-stream, which isn't very useful. ",2
+19," I am attaching it again, and specifying type \""text\"". ",5
+19, Please ignore the previous attachment and get this new one.,5
+19," Carolyn, Sorry, but I used your code snippet and I do indeed hear the group box names along with the individual radio buttons.  ",2
+19, I am using JAWS 5.1.383.,5
+19," I am also using JAWS 5.10.383, and I still don't hear \""Foreground\"" or \""Background\"". ",0
+19, we must have different settings somehow.,5
+19," I will attach my default.jcf (I believe that it is \""straight from the factory\"". ",5
+19, I do not have a javaw.jcf. ,2
+19, Maybe we can figure out what setting you have set that I don't have set.,0
+19, Created an attachment (id=15052) [details],4
+19, C:\\JAWS510\\SETTINGS\\enu\\Default.JCF,4
+19," After further investigation, we determined that the problem only happens on Windows XP with the javaw.exe.manifest installed in jre/bin (this tells WinXP to use the WinXP common controls - version 6.0 - instead of the Win2K common ",1
+19, controls - version 5.x).,4
+19, This problem is solved in JAWS.  ,1
+19, The window class for this object has been reassigned internally in JAWS.  ,1
+19, This fix will be reflected in JAWS version 6.0 which is due out shortly.,1
+19, Verified that this now works in JAWS 6.0.,1
+19," Thank-you, Frank!",6
+19, *** Bug 51963 has been marked as a duplicate of this bug. ***,4
+19, close,6
+20," Hi Martin,",6
+20," after installation of Teneo the entry \""Ant Home Entries (Default)\"" on the classpath page of Preferences-&gt;Ant-&gt;Runtime is empty (though the child entries of this tree node are visible).",0
+20," In addition to this I get a lot of NullPointerExceptions in the .log with \""Malformed URL\"" as Message when I open that preference page. ",0
+20, The stack does not show any participation of teneo.,0
+20," I tested it on a complete new eclipse (RCP version) installation (M20080221-1800 ) with the EMF, GEF and GMF features installed in an empty workspace. ",0
+20," After each installation I looked at the that \""Ant Home Entries\"" entry and all was fine. ",0
+20, But after installation of teneo it vanished. ,0
+20, After disabling of the teneo plugin the entry is visible again.,0
+20, gr. Manfred,6
+20," Hi Manfred,",6
+20, This seems strange behavior as installing teneo should not interfere with the rest of the eclipse installation. ,5
+20, Teneo is really just a set of plugins which do not change other plugins.,5
+20, Can you remove .log file and then restart eclipse with the -clean option and then attach the resulting .log file to this bugzilla?,5
+20," In addition which versions of eclipse, emf, etc. are you using?",3
+20, Can you also attach a screendump of the strange thing you see in preferences/ant?,5
+20, Does the plugin/feature information say something special? You can find it here:,5
+20, Help/Software Updates/Manage Configuration,5
+20, note that this view has a button to hide non-loaded features/plugins. ,5
+20, Can you see which plugins fail to load? ,3
+20, Depending on the version of eclipse you can see some more details of why the plugin failed to load.,5
+20, gr. Martin,6
+20, Created an attachment (id=95747) [details],4
+20, log-file with errors after opening Ant Runtime Preferences,0
+20, Created an attachment (id=95748) [details],4
+20, Ant Runtime Preferences screenshot,4
+20, Created an attachment (id=95749) [details],4
+20, Configuration from Software Updates/Mangage Configuration,1
+20," Hi Martin,",6
+20, I have made the complete new configuration today and have added each new feature with the update manager.,2
+20, Perhaps this is a case that belongs to the core team of eclipse? ,5
+20, gr.,6
+20, Manfred,6
+20," Hi Martin,",6
+20, as you see from the .log-file I forgot the -clean flag. ,0
+20," Now I did it, but the .log-file only differs in that this setting is now shown. ",0
+20," All other messages including that curious \""Invalid perference page: Cache\"" are the same.",0
+20, gr. Manfred,6
+20," Hi Manfred,",6
+20, Yes I can really not think on how this can be caused by Teneo. ,2
+20, I have moved the issue to the platform project. ,5
+20, Can you post a topic on the platform newsgroup (with a link to this bugzilla)?,3
+20, Maybe they know right away what's wrong.,2
+20, gr. Martin,6
+20, This behaviour did vanish with the teneo version I200805200858. ,1
+20, I believe there had been a consolidation of used libraries.,2
+20, Because of this I set set the resolution to fixed.,1
+21, The releng test have been DNF for the last couple builds. Running locally we occasionally see crashes in the BrowserTests so we suspect these crashes to be the cause of the DNF.,0
+21, Created an attachment (id=135853) [details],4
+21," Pushing this fix for RC2, as it's too risky to make this change for RC1 now.",5
+21, For RC1 we'll comment out the crashing tests so that the other tests can run properly. ,5
+21," We have NOT seen this bug affect the usability of Eclipse, only the running of the SWT test suite.",5
+21," The problem is that the strategy we use to release pools periodically (in readAndDispatch, createWidget, etc) to be able to run the test suites, releases the main thread pool created be Device and stored in a thread local dictionary.",0
+21, The pool was not removed from the thread local dictionary and got reused the next time a display was created.,0
+21, The new strategy is to only release the main thread pool when the device count goes to zero.,1
+21," Obviously, something this low level needs as much testing as it can get. ",2
+21, Can we get a test build run to verify all tests pass/no crashes/no OOM/etc? ,5
+21," Also, you should be doing the two day test pass on a version of SWT that includes the change.",5
+21, Created an attachment (id=136083) [details],4
+21, new fix,6
+21," The new fix is simpler, we just make sure the the pool in the thread dictionary is always valid, that way when another display is created it will not use a released pool.",1
+21, There was a further problem where the pool was released too early. ,0
+21," If we are in call in, we cannot released the top of the stack pool.",0
+21, The tests that where showing this problem have been put back (just in HEAD).,0
+21, Fixed &gt; 20090515,4
+22, User-Agent:       Mozilla/5.0 (X11; U; Linux x86_64; fr-FR; rv:1.8.1.13) Gecko/20080311 Iceweasel/2.0.0.13 (Debian-2.0.0.13-1),4
+22, Build Identifier: 0.8 (2008033118),4
+22," When a calendar to which I am subscribed no longer exists, Lightning will try indefinitely to reach it and use 100% of my CPU. This, despite the 404 results it receives.",0
+22, Reproducible: Always,0
+22, Steps to Reproduce:,0
+22, 1. create a calendar on your server,0
+22, 2. subscribe to it via Lightning,0
+22, 3. quit Thunderbird,0
+22, 4. erase the calendar from your server,0
+22, 5. relaunch Thunderbird,0
+22, Actual Results:  ,0
+22," A propfind is executed on the resource, resulting in a 404 error code. ",0
+22," An OPTION on the parent directory occurs, with a 200 result. ",0
+22, Then the loop continues with a new propfind...,0
+22, Expected Results:  ,0
+22, I would expect Lightning to stop trying to reach the calendar collection as,0
+22, soon as it receives the 404 result.,0
+22, Here is a trace of what happens (obtained with tcpflow):,0
+22, PROPFIND /SOGo/dav/wsourdeau/Calendar/1D52AE6B-8564-0001-6A40-17B089902560/,0
+22, HTTP/1.1,4
+22, x-webobjects-server-protocol: HTTP/1.1,4
+22, x-webobjects-remote-addr: 127.0.0.1,4
+22, x-webobjects-remote-host: 127.0.0.1,4
+22, x-webobjects-server-name: localhost,4
+22, x-webobjects-server-url: http://localhost,4
+22, Host: localhost,4
+22, User-Agent: Mozilla/5.0 (X11; U; Linux i686 (x86_64); fr; rv:1.8.1.12),4
+22, Gecko/20080213 Lightning/0.8 Thunderbird/2.0.0.12,4
+22, Accept: text/xml,4
+22," Accept-Language: fr,fr-fr;q=0.8,en-us;q=0.5,en;q=0.3",4
+22, Accept-Encoding: gzip,4
+22," ,deflate",4
+22," Accept-Charset: utf-8,*;q=0.1",4
+22, Keep-Alive: 300,4
+22, Connection: keep-alive,4
+22, Content-Length: 86,4
+22, Content-Type: text/xml; charset=utf-8,4
+22, Depth: 0,4
+22," &lt;D:propfind xmlns:D=\""DAV:\""&gt;",4
+22,   &lt;D:prop&gt;,4
+22,     &lt;D:resourcetype/&gt;,4
+22,   &lt;/D:prop&gt;,4
+22, &lt;/D:propfind&gt;,4
+22, HTTP/1.0 401 Authorization Required,4
+22, content-length: 0,4
+22," www-authenticate: basic realm=\""SOGo-0.9\""",4
+22, PROPFIND /SOGo/dav/wsourdeau/Calendar/1D52AE6B-8564-0001-6A40-17B089902560/,4
+22, HTTP/1.1,4
+22, x-webobjects-server-protocol: HTTP/1.1,4
+22, x-webobjects-remote-addr: 127.0.0.1,4
+22, x-webobjects-remote-host: 127.0.0.1,4
+22, x-webobjects-server-name: localhost,4
+22, x-webobjects-server-url: http://localhost,4
+22, Host: localhost,4
+22, User-Agent: Mozilla/5.0 (X11; U; Linux i686 (x86_64); fr; rv:1.8.1.12),4
+22, Gecko/20080213 Lightning/0.8 Thunderbird/2.0.0.12,4
+22, Accept: text/xml,4
+22," Accept-Language: fr,fr-fr;q=0.8,en-us;q=0.5,en;q=0.3",4
+22, Accept-Encoding: gzip,4
+22," ,deflate",4
+22," Accept-Charset: utf-8,*;q=0.1",4
+22, Keep-Alive: 300,4
+22, Connection: keep-alive,4
+22, Content-Length: 86,4
+22, Content-Type: text/xml; charset=utf-8,4
+22, Depth: 0,4
+22, Authorization: Basic hidden,4
+22," &lt;D:propfind xmlns:D=\""DAV:\""&gt;",4
+22,   &lt;D:prop&gt;,4
+22,     &lt;D:resourcetype/&gt;,4
+22,   &lt;/D:prop&gt;,4
+22, &lt;/D:propfind&gt;,4
+22, HTTP/1.0 404 Not found,4
+22, content-length: 85,4
+22, content-type: text/html,4
+22, object not found: wsourdeau =&gt; Calendar =&gt;,4
+22, 1D52AE6B-8564-0001-6A40-17B089902560,4
+22, PROPFIND /SOGo/dav/wsourdeau/Calendar/1D52AE6B-8564-0001-6A40-17B089902560/,4
+22, HTTP/1.1,4
+22, x-webobjects-server-protocol: HTTP/1.1,4
+22, x-webobjects-remote-addr: 127.0.0.1,4
+22, x-webobjects-remote-host: 127.0.0.1,4
+22, x-webobjects-server-name: localhost,4
+22, x-webobjects-server-url: http://localhost,4
+22, Host: localhost,4
+22, User-Agent: Mozilla/5.0 (X11; U; Linux i686 (x86_64); fr; rv:1.8.1.12),4
+22, Gecko/20080213 Lightning/0.8 Thunderbird/2.0.0.12,4
+22, Accept: text/xml,4
+22," Accept-Language: fr,fr-fr;q=0.8,en-us;q=0.5,en;q=0.3",4
+22, Accept-Encoding: gzip,4
+22," ,deflate",4
+22," Accept-Charset: utf-8,*;q=0.1",4
+22, Keep-Alive: 300,4
+22, Connection: keep-alive,4
+22, Content-Length: 86,4
+22, Content-Type: text/xml; charset=utf-8,4
+22, Depth: 0,4
+22, Authorization: Basic hidden,4
+22," &lt;D:propfind xmlns:D=\""DAV:\""&gt;",4
+22,   &lt;D:prop&gt;,4
+22,     &lt;D:resourcetype/&gt;,4
+22,   &lt;/D:prop&gt;,4
+22, &lt;/D:propfind&gt;,4
+22, OPTIONS /SOGo/dav/wsourdeau/Calendar/ HTTP/1.1,4
+22, x-webobjects-server-protocol: HTTP/1.1,4
+22, x-webobjects-remote-addr: 127.0.0.1,4
+22, x-webobjects-remote-host: 127.0.0.1,4
+22, x-webobjects-server-name: localhost,4
+22, x-webobjects-server-url: http://localhost,4
+22, Host: localhost,4
+22, User-Agent: Mozilla/5.0 (X11; U; Linux i686 (x86_64); fr; rv:1.8.1.12),4
+22, Gecko/20080213 Lightning/0.8 Thunderbird/2.0.0.12,4
+22, Accept: text/xml,4
+22," Accept-Language: fr,fr-fr;q=0.8,en-us;q=0.5,en;q=0.3",4
+22," Accept-Encoding: gzip,deflate",4
+22," Accept-Charset: utf-8,*;q=0.",4
+22,1,4
+22, Keep-Alive: 300,4
+22, Connection: keep-alive,4
+22, HTTP/1.0 404 Not found,4
+22, content-length: 85,4
+22, content-type: text/html,4
+22, object not found: wsourdeau =&gt; Calendar =&gt;,4
+22, 1D52AE6B-8564-0001-6A40-17B089902560,4
+22, HTTP/1.0 401 Authorization Required,4
+22, content-length: 0,4
+22," www-authenticate: basic realm=\""SOGo-0.9\""",4
+22, OPTIONS /SOGo/dav/wsourdeau/Calendar/ HTTP/1.1,4
+22, x-webobjects-server-protocol: HTTP/1.1,4
+22, x-webobjects-remote-addr: 127.0.0.1,4
+22, x-webobjects-remote-host: 127.0.0.1,4
+22, x-webobjects-server-name: localhost,4
+22, x-webobjects-server-url: http://localhost,4
+22, Host: localhost,4
+22, User-Agent: Mozilla/5.0 (X11; U; Linux i686 (x86_64); fr; rv:1.8.1.12),4
+22, Gecko/20080213 Lightning/0.8 Thunderbird/2.0.0.12,4
+22, Accept: text/xml,4
+22," Accept-Language: fr,fr-fr;q=0.8,en-us;q=0.5,en;q=0.3",4
+22," Accept-Encoding: gzip,deflate",4
+22," Accept-Charset: utf-8,*;q=0.",4
+22,1,6
+22, Keep-Alive: 300,4
+22, Connection: keep-alive,4
+22, OPTIONS /SOGo/dav/wsourdeau/Calendar/ HTTP/1.1,4
+22, x-webobjects-server-protocol: HTTP/1.1,4
+22, x-webobjects-remote-addr: 127.0.0.1,4
+22, x-webobjects-remote-host: 127.0.0.1,4
+22, x-webobjects-server-name: localhost,4
+22, x-webobjects-server-url: http://localhost,4
+22, ....,4
+22, [ad finitum],4
+22," When using the display of source and destination ip/port in tcpflow, I notice the Lightning side always has a different port, which leads me to think that many connections are occuring at the same time.",0
+22, The problem occurs when safeRefresh() is called from calDavCalendar.js.,0
+22," In there, we have the following condition:",5
+22,     if (!this.mCtag || !this.mFirstRefreshDone) {,4
+22,             var refreshEvent = this.prepRefresh();,4
+22,"         this.getUpdatedItems(refreshEvent, aChangeLogListener);",4
+22,             return;,4
+22,         },4
+22," this.mFirstRefreshDone is false because since the calendar was removed, we never got a chance to complete the call to getCalendarData() nor checkDavResourceType() (see https://bugzilla.mozilla.org/show_bug.cgi?id=463961 for that one...).",4
+22," So, we'll enter into an infinite loop because getUpdatedItems() calls right at the beginning checkDavResourceType() since the calendar was marked as disabled.",5
+22," But, checkDavResourceType() doesn't check for the 404 error code. ",5
+22, We have:,6
+22,"            var str = convertByteArray(aResult, aResultLength);",4
+22,             if (!str) {,4
+22,"                 dump(\""CalDAV: Failed to determine resource type\"");",4
+22,"                 thisCalendar.completeCheckServerInfo(aChangeLogListener, ",4
+22,                                                     ,4
+22, Components.interfaces.calIErrors.DAV_NOT_DAV);,4
+22,                 return;,4
+22,             } else if (thisCalendar.verboseLogging()) {,4
+22,"                 dump(\""CalDAV: recv: \"" + str);",4
+22,             },4
+22, and we should rather have something like:,5
+22,"            var str = convertByteArray(aResult, aResultLength);",4
+22,             if (!str || aContext.responseStatus == 404) {,4
+22,"                 dump(\""CalDAV: Failed to determine resource type\"");",4
+22,"                 thisCalendar.completeCheckServerInfo(aChangeLogListener, ",4
+22,                                                     ,4
+22, Components.interfaces.calIErrors.DAV_NOT_DAV);,4
+22,                 return;,4
+22,             } else if (thisCalendar.verboseLogging()) {,4
+22,"                 dump(\""CalDAV: recv: \"" + str);",4
+22,             },4
+22," This cause checkDavResourceType() to (incorrectly) continue its processing, which will cause a call to completeCheckServerInfo() with a success code and then again, a call to safeRefresh(), creating an infite loop for cached calendars.",0
+22, Created an attachment (id=363577) [details],4
+22, Proposed fix,4
+22, This bug is critical in order to avoid an endless loop and also in order to avoid generating _tons_ of HTTP requests to the CalDAV server (up to 10-20 per second).,1
+22, (From update of attachment 363577 [details]),4
+22," Looks good, r=philipp.",6
+22, I've added another completeCheckServerInfo further above since calling request.responseStatus if there was some sort of request error causes it to throw. ,5
+22," This is caught further above, but if we use it again here then we should break out earlier.",5
+22, Pushed to comm-central &lt;http://hg.mozilla.org/comm-central/rev/7e4da21b2924&gt;,4
+22, -&gt; FIXED,4
+23," For some time (2 months? more?, i don't remember) i have this problem:",0
+23," --&gt; if i drag and drop a folder from a location to an other, cpu use for thunderbird process is more than 50%.",0
+23, --&gt; Even if the folder is empty,0
+23, --&gt; It occurs with subfolder move inside Local Folders,0
+23, --&gt; It occurs with folder move inside a pop account (for example moving Inbox-&gt;test to Draft-&gt;test,0
+23," --&gt; It DOESN'T occurs when moving a folder from a pop account to an other (for example moving AccoutA --&gt; Inbox --&gt; test to AccountB --&gt; Inbox --&gt;test ... Butin this case, by design, folder is copied, not moved --&gt; it seems that this is",0
+23, the delete which is the problem,0
+23, Other Facts,0
+23, ============,6
+23, - Memory doesn't change during the move time ... only a high level of cpu use,0
+23, - Delete key or Right-click delete (so move to trash) got the same bad result,0
+23, - Renaming a folder take a long time too,0
+23," - Checking pop account take more resources than before ... 10 to 20\"" of high cpu resource for checking mail, slowing a lot of windows applications",0
+23, - Same thing for RSS folders ...,0
+23, Hardware and Software information,6
+23, =================================,6
+23," Computer: Dell Latitude D820 laptop, Core 2 Duo 2GHz, 2Go Ram, 100Go HD 7200rpm",4
+23, OS: Windows Vista Business,4
+23, Thunderbird: TB nightly 2.0.0.10pre (2007111403) ... but problem occurs since long time,4
+23, Profile: profile.ini modified to have the profile files on D:\\Thunderbird\\JMR.profil. ,4
+23, All emails account store on D:\\Thunderbird\\ (13 pop account + 69 RSS feeds),4
+23, D:\\Thunderbird: 2.3Go,4
+23, Bigger file: 384Mo,4
+23," Configuration: each pop has its own folder (inbox, etc ...) but rules filters lot of mails to subfolder in local folder directory",0
+23," I've check bugzilla for similar bug, event Mozillazine forum, but never seen something like this",2
+23, Additional information: Running in safe mode: same problem,0
+23,   ohoh ... thus bug seems related to my 10000 temp files in temp folder: tmprules-xxx.dat,0
+23, I've deleted all of them --&gt; filters works again AND this bug seems solved by removing them,5
+23, bad news: new tmprules begin to appairs ...,0
+23," So, this bug is a dup of bug 362539",5
+23, *** This bug has been marked as a duplicate of bug 362539 ***,5
+23, I guess the really low perf behaviour was coming that TB parsed all 10000 rules files for all received mail ...,5
+23," same thing when moving a folder, it parsed the 10000 rules files to see if these have to be updated after the move",5
+23, (In reply to comment #2),4
+23, &gt; ohoh ... thus bug seems related to my 10000 temp files in temp folder: tmprules-xxx.dat,4
+23, &gt; ,4
+23, &gt; I've deleted all of them --&gt; filters works again  AND this bug seems solved by removing them,4
+23, &gt; ,4
+23, &gt; bad news: new tmprules begin to appairs ...,4
+23, &gt; ,4
+23," &gt; So, this bug is a dup of bug 362539",4
+23, &gt; ,4
+23, &gt; *** This bug has been marked as a duplicate of bug 362539 ***,4
+23, &gt; ,4
+23, This bug is not a duplicate of bug 362539.,5
+23, Reason:,6
+23," 1) Although the underlying cause may be the same, the symptoms of the two bugs are very different.",2
+23," 2) Since the description attached to bug 362539 does not include the symptoms of this bug, it does not properly include this reported problem.",2
+23," 3) When users search for this problem, now that this bug is closed, they probably will not find this description. ",2
+23, Nor will they find bug 362539 since it does not include these symptoms at the top level. ,2
+23, Hence they will not find the circumvention.,2
+23," 4) Therefore, please re-open this bug report.",2
+23, 5) Please do not attempt to amend the description of bug 362539. ,2
+23," Please leave that decision, as well as that of closure, to one of the Bugzilla 'monitors'",5
+23," who will know whether that is appropriate and, if so, how to do it cleanly, without obscuring user access to information.",3
+23, you're right ... ,6
+23, this bug depends of 362539 and not a dupe,5
+23, (In reply to comment #5),4
+23, &gt; you're right ... this bug depends of 362539 and not a dupe,4
+23, &gt; ,4
+23, Thank you.,6
+23," Adding \""tmprules-N.dat\"" in bug summary, for ease of search & understanding bug.",5
+23, (It looks to be too long. Please modify to appropriate one.),5
+23, Resolved fixed as bug 375292 is fixed on branch 1.8 and trunk,1
+23, *** Bug 410739 has been marked as a duplicate of this bug. ***,5
+24, User-Agent:       Mozilla/5.0 (Macintosh; U; PPC Mac OS X Mach-O; en-US;rv:1.8b2) Gecko/20050528 Firefox/1.0+,4
+24, Build Identifier: Mozilla/5.0 (Macintosh; U; PPC Mac OS X Mach-O; en-US;rv:1.8b2) Gecko/20050528 Firefox/1.0+,4
+24, The folders pane in Thunderbird that lists my e-mail accounts and local folders does not allow me to select several folders at once. ,0
+24," For instance I should be able to click on my James folder to select it, shift-click on my John folder to select it without deselecting the James folder, and then drag them *both* into my Friends folder. ",0
+24, Currently I have to do this one at a time.,0
+24, Reproducible: Always,0
+24, Steps to Reproduce:,0
+24, 1. Click on a local folder,0
+24, 2. Shift-click on a different local folder,0
+24, Actual Results:  ,0
+24, The first folder is deselected. ,0
+24, Expected Results:  ,0
+24, Kept both selected. ,0
+24, Possibly there's a difference here between shift and command-clicking (on a Mac). ,5
+24, Shift click should perhaps select everything between the clicked folder and the currently selected folder. ,5
+24, Command-clicking normally selects only the folders you explicitly click on. ,5
+24, Possibly there are other conventions on other platforms for multiple selections. ,5
+24," But multiple selections should be possible,",5
+24," This is an automated message, with ID \""auto-resolve01\"".",5
+24, This bug has had no comments for a long time. ,5
+24," Statistically, we have found that bug reports that have not been confirmed by a second user after three months are",5
+24, highly unlikely to be the source of a fix to the code.,5
+24," While your input is very important to us, our resources are limited and so we are asking for your help in focussing our efforts. ",5
+24," If you can still reproduce this problem in the latest version of the product (see below for how to obtain a copy) or, for feature requests, if it's not present in the latest version and you still believe we should implement it, please visit the URL of this bug (given at the top of this mail) and add a comment to that effect, giving more reproduction information if you have it.",5
+24," If it is not a problem any longer, you need take no action. ",5
+24," If this bug is not changed in any way in the next two weeks, it will be automatically resolved.",5
+24, Thank you for your help in this matter.,6
+24, The latest beta releases can be obtained from:,0
+24, Firefox:     http://www.mozilla.org/projects/firefox/,4
+24, Thunderbird: http://www.mozilla.org/products/thunderbird/releases/1.5beta1.html,4
+24, Seamonkey:   http://www.mozilla.org/projects/seamonkey/,4
+24, *** Bug 310352 has been marked as a duplicate of this bug. ***,4
+24, Suite bug 50767.,4
+24, This is highly-desirable in my opinion. ,2
+24, I would like to see this implemented for easier management of RSS subscriptions.,5
+24, *** Bug 366757 has been marked as a duplicate of this bug. ***,4
+24," I would love to see this closed, and also dragging up and down the folder pane much faster.",2
+24, *** Bug 398712 has been marked as a duplicate of this bug. ***,4
+24, This is pretty basic stuff. ,2
+24, It's been a bit of a showstopper when migrating Outlook users over to Thunderbird since heavy users often have tons of folders to organise their emails. ,5
+24," Importing their mail just dumps these folders into Local Folders and then they can't be re-organised in their inbox without going through them all one-by-one, which is just silly.",5
+24," On latest trunk multiple folders can be selected but there is completely no benefit of it: on drag and drop only 1 folder is moved, CM shows only 3 entries (open, open in new tab, properties) and even they are useless ;) (nothing happens / empty tab).",1
+24, Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9.1b2pre) Gecko/20081030 Lightning/1.0pre Shredder/3.0b1pre,4
+24, blockingâ€‘thunderbird3 ?,4
+24, Multiple selection should be either useful or not possible at all.,5
+24, Adjusting description.,6
+24, Marking as regression as in 2.0 you couldn't select more than one folder at a time.,5
+24," Would be great if someone went through and made context commands work where it should, but at the very least we should make commands unavailable when they won't work anyway. ",5
+24, blocking-tb3+ to at least get the minimal fix in.,5
+24," Magnus, care to own this bug?",3
+24," Sure, though if someone want's to take it on it's up for grabs.",2
+24, *** Bug 481159 has been marked as a duplicate of this bug. ***,4
+24, I'll put this up for m5 since it's not active right now,5
+24, Created an attachment (id=374607) [details],4
+24, proposed fix,4
+24, The items that I think make sense for multi select:,5
+24, Get Messages,5
+24,"  o if only servers, or it's only newsgroups/feeds ",5
+24, Open ,5
+24,  o though I question that we should have this item *at all*,5
+24, Open in new Tab,5
+24, Unsubscribe,5
+24,  o if it's newsgroups only,5
+24, Delete ,5
+24,"  o would have been useful, but the confirmation dialogs are not in js, we have multiple delete models etc so i gave up and just disabled it for multi selection",5
+24, Compact,5
+24, Mark Folder/s Read,5
+24, Mark Newsgroup/s Read,5
+24, ---,6
+24, Other notes:,5
+24,  - hitting delete on ng to unsubscribe was broken (confirmUnsubscribe vs ConfirmUnsubscribe),5
+24,  - new saved search wasn't enabled for news - but you can create one,5
+24,  - moving away from GetSelectedMsgFolders() to gFolderTreeView.getSelectedFolders(),5
+24, Still to do (maybe in another bug...):,5
+24,  - fix tools menu folder commands,5
+24,  - drag'n'drop (disable for multi?),5
+24, ---,6
+24, Phil: got bandwidth for this?,3
+24, (From update of attachment 374607 [details]),4
+24," Looks good to me, except",2
+24," &gt;+   * Compacts either or all folders for accounts that the given folders belong to, or for accounts of the currently selected folders.",4
+24," That's hard enough to parse even without the stray or in \""either or\"" ;)",5
+24, (From update of attachment 374607 [details]),4
+24, sounds good from the description,6
+24, I was going to add the checkin-needed keyword but you probably want to fix the nits first,2
+24, changeset:   2593:2f6ef8daa83e,4
+24, http://hg.mozilla.org/comm-central/rev/2f6ef8daa83e,4
+24, -&gt;FIXED,4
+24," Note to testers: now that this landed the commands of the folder context menu should work for multiple folders, if the are shown (and enabled). ",5
+24, There's a lot of different possible combinations of folders/servers of different kinds possible so it would be good if people could make sure all cases work as they should for them.,5
+25," While using Alt+Tab for switching between applications works fine in my KDE4 post RC1 version, when I try to use Alt+Shift+Tab shortcut the keyboard did not respond anymore and I don't know how to get it back.",0
+25," However the mouse it is still working properlly, so I can logout with the mouse and I when I log back the keyboard it also works.",0
+25, I just hit this bug as well. ,2
+25, But unfortunately I can't re-trigger it at the moment. ,0
+25," While alt-shift-tab doesn't do anything here, the keyboard is still accessible.",0
+25, This is really a serious problem. ,6
+25, It seems that if I hit Alt+Shift+tab directly I always get the problem. ,0
+25," And if I just hit Alt+Tab and then Alt+Shift+tab and release I get it as well, so I have to make sure I always hit Alt+Tab as last thing.",0
+25," In KDE 3, Alt+Shift+Tab is one of the possible shortcuts used for switching keyboard layouts (keyboard layout kcm -&gt; xkb options -&gt; layout switching tree item). ",0
+25," Even though I don't have that box ticked, it still persists in changing the layout with that shortcut. ",0
+25," Perhaps, the shortcut is being sent to the same place but is causing a crash due to some bitrot?",5
+25," While editing kglobalaccelsrc to change the shortcut does help, killing kxkb doesn't help at all and thus I don't think its kxkb causing the problem.",2
+25, *** Bug 153495 has been marked as a duplicate of this bug. ***,4
+25, I confirm. ,6
+25, I had to reboot. ,2
+25, Note that the mouse was behaving has if the Shift key was pressed: it was extending the selection when clicking with the left button. ,0
+25," The problem is in KGlobalAccel, it doesn't release the grab when a shortcut is set that isn't triggered. ",1
+25," Which is the case for Alt+Shift+Tab, the shortcut that is actually send by X11 is Alt+Shift+Backtab. ",1
+25, Re-Assigning.,6
+25, *** Bug 153754 has been marked as a duplicate of this bug. ***,4
+25, SVN commit 747205 by apaku:,4
+25," Add a hotfix for Bug #153211, also ungrab the keyboard when Alt+Shift+Backtab was hit CCBUG:153211",1
+25,  M  +5 -1      kglobalaccel_x11.cpp  ,4
+25, WebSVN link: http://websvn.kde.org/?view=rev&revision=747205,4
+25," Thanks, your hotfix fixed this problem, however on the past KrushDay someone mentioned a similar issue pressing Alt+PrintScr which is still present for me.",1
+25," I don't know if this is related with the original issue, but if not you can close this bug.",2
+25," It could be, I'll check later today. ",2
+25, IIRC Alt+Print Screen is some snapshot function right? ,3
+25, You can easily check wether its the same issue by doing the following:,5
+25, Open $HOME/.kde4/share/config/kglobalshortcutsrc and find the action there.,5
+25, Then open any shortcut dialog in any application and change one of the shortcuts. ,5
+25, When you're asked for pressing the new keyboard combination press the Alt+Print keys and check wether the label of the shortcut button is now the same as that in the rc-file. ,5
+25," If they differ its the same problem and that means we need a different fix for this problem, than the hotfix I comitted.",5
+25," In kglobalshortcutsrc I have assigned Alt+Print to kwin, and also Alt+Shift+Tab to kwin. ",5
+25," But if in one application like Konqueror or Konsole I assing a new shortcurt to Alt+Print it get's changed automatically to Alt+Shift+Print, so I can't assign another Alt+Print shortcut.",5
+25," However I can assign Alt+Shift+Tab shortcut, but besides it is still showing it in shortcut settings it doesn't work, and also it doesn't appear in kglobalshortcutsrc apart from the old one already existing and assigned to kwin.",2
+25," Also I don't know if is my setup but in 'kcmshell4 keys' I can't modify any shortcut, in fact, it doesn't show any, but that can be another bug.",2
+25," Ok  as far as I can see this is the same problem, namely that the keys Alt+Print don't produce the X11 keysequence that is expected. ",0
+25, In particular Alt+Shift+Tab creates a Qt key sequence of Alt+Shift+Backtab and seemingly Alt+Print creates Alt+Shift+Print in Qt key sequence. ,5
+25, So this is indeed the same problem.,5
+25," Regarding the keys kcm: Thats \""expected\"", the kcm hasn't been properly ported.",0
+25, I've already posted a patch for a minimal port to the kde-core list. ,5
+25," That one will get comitted next monday, unless I get objections.",5
+25, I discovered another similar shortcut which is Ctrl+PrintScrn but this doesn't suffer this problem and works as expected.,0
+25," To my knowledge, only Alt+Shift+Print and Alt+Print are triggered by this bug.",0
+25, *** Bug 154692 has been marked as a duplicate of this bug. ***,4
+25, *** Bug 156069 has been marked as a duplicate of this bug. ***,4
+25, SVN commit 763132 by lunakl:,4
+25," Since calling directly Xlib's XGrabKeyboard() is very unlikely and even probably undesired in kded, make KGlobalAccel again ungrab when there's no Qt caused grab.",1
+25, BUG: 153211,4
+25,  M  +0 -7      kdedglobalaccel.cpp  ,4
+25,  M  +1 -4      kdedglobalaccel.h  ,4
+25,  M  +11 -11    kglobalaccel_x11.cpp  ,4
+25, WebSVN link: http://websvn.kde.org/?view=rev&revision=763132,4
+25, *** Bug 156434 has been marked as a duplicate of this bug. ***,4
+25, this bug should still be open. ,5
+25, I am running 4.2 beta 2 and this problem is still there.,0
+25, I've found this bug in KDE 4.2 too. ,0
+25," I don't know if there is any specific key-combination that triggers it, but KWin acts as if I'm holding down the ALT-key, moving windows when I click and drag in them.",0
+25, (Kubuntu 8.10 (intrepid) packages from kubuntu-experimental),4
+26, Version:            (using KDE KDE 3.1KDE 1.2),4
+26, Installed from:    SuSE RPMsSuSE RPMs,4
+26, Sniff allows to find all locations from where a selected function is called.,0
+26, KDevelop already allows to 'grep foo(' in the context menu of the class treeview. ,0
+26, While this feature doesn't work for me at all it would not do a good job since:,0
+26, 1. It finds calls of the same function name belonging to a different class,0
+26, 2. It doesn't find calls of functions if there are whitespaces between the function name and the left bracket such as foo-&gt;bar ();,0
+26, 3. It doesn't distinguish between overloaded functions,0
+26, It would be nice to know your KDevelop version! ,5
+26,  ,6
+26, Subject: Re:  find callers of functions         ,6
+26, version 2.1.3. Sorry if the feature is in a newer version of KDevelop (3.0) but nothing in the changelog suggests that.,0
+26, -Rudiger,6
+26, --- Amilcar do Carmo Lucas &lt;a.lucas@tu-bs.de&gt; wrote:,4
+26, &gt; ------- You are receiving this mail because: -------,4
+26," &gt; You reported the bug, or are watching the reporter.",4
+26, &gt;      ,4
+26, &gt; http://bugs.kde.org/show_bug.cgi?id=61263     ,4
+26, &gt; a.lucas@tu-bs.de changed:,4
+26, &gt; ,4
+26, &gt;            What    |Removed                     |Added,4
+26, &gt;,4
+26, ----------------------------------------------------------------------------,4
+26, &gt;           Component|general                     |classview,4
+26, &gt; ,4
+26, &gt; ,4
+26, &gt; ,4
+26, &gt; ------- Additional Comments From a.lucas@tu-bs.de  2003-07-15 10:57,4
+26, &gt; -------,4
+26, &gt; It would be nice to know your KDevelop version!,5
+26," Sorry, KDevelop 2.x is no longer under development.",5
+26," You are strongly advised to update to the latest CVS version of KDevelop3, code name gideon, take a look at:",5
+26, http://www.kdevelop.org/index.html?filename=branches_compiling.html,4
+26, for all the details you need. ,5
+26, If you find a problem or need help please send a mail to the mailing list:,5
+26, http://www.kdevelop.org/index.html?filename=mailinglist.html,4
+26," or drop us a line at the channel #kdevelop on the server irc.kde.org using ksirc, for example.",5
+26, Please use the CVS version and compile it yourself because that way you can easily patch it if a bug is found.,5
+26, KDevelop3 can open Develop2 projects. ,5
+26," To do so, goto the \""Project -&gt; Open Project ... \"" and select \""KDevelop 2 Project Files\"" in the \""Filter:\"".",5
+26, You can have and run KDevelop3 and KDevelop2 at the same time on the same computer without any problems.,5
+26, So migrating is a breeze. :),5
+26, P.S. : The KDevelop team closed over 452 reported and confirmed bugs since the release of KDevelop2.1.3,5
+26, The bad news is that KDevelop3 currently has 120 reported bugs :(,5
+26, Subject: Re:  find callers of functions         ,5
+26, Unfortunatelly I am behind a huge firewall. ,2
+26, Would you be so kind to send a tarball to ruediger.koch@db.com ?,3
+26, Thanks a lot,6
+26, -Rudiger,4
+26, --- Amilcar do Carmo Lucas &lt;a.lucas@tu-bs.de&gt; wrote:,4
+26, &gt; ------- You are receiving this mail because: -------,4
+26," &gt; You reported the bug, or are watching the reporter.",4
+26, &gt;      ,4
+26, &gt; http://bugs.kde.org/show_bug.cgi?id=61263     ,4
+26, &gt; a.lucas@tu-bs.de changed:,4
+26, &gt; ,4
+26, &gt;            What    |Removed                     |Added,4
+26, &gt;,4
+26, ----------------------------------------------------------------------------,4
+26, &gt;             Version|unspecified                 |2.1.3,4
+26, &gt; ,4
+26, &gt; ,4
+26, &gt; ,4
+26, &gt; ------- Additional Comments From a.lucas@tu-bs.de  2003-07-15 12:01,4
+26, &gt; -------,4
+26," &gt; Sorry, KDevelop 2.x is no longer under development.",5
+26, &gt; ,4
+26," &gt; You are strongly advised to update to the latest CVS version of KDevelop3, code name gideon, take a look at:",5
+26, &gt; http://www.kdevelop.org/index.html?filename=branches_compiling.html,4
+26, &gt; for all the details you need. ,4
+26, &gt; If you find a problem or need help please send a mail to the mailing list:,5
+26, &gt; http://www.kdevelop.org/index.html?filename=mailinglist.html,4
+26," &gt; or drop us a line at the channel #kdevelop on the server irc.kde.org using ksirc, for example.",5
+26, &gt; Please use the CVS version and compile it yourself because that way you can easily patch it if a bug is found.,5
+26, &gt; ,4
+26, &gt; KDevelop3 can open Develop2 projects. ,4
+26," &gt; To do so, goto the \""Project -&gt; Open Project ... \"" and select \""KDevelop 2 Project Files\"" in the \""Filter:\"".",5
+26, &gt; You can have and run KDevelop3 and KDevelop2 at the same time on the same computer without any problems.,5
+26, &gt; So migrating is a breeze. :),5
+26, &gt; ,4
+26, &gt; P.S. : The KDevelop team closed over 452 reported and confirmed bugs since the release of KDevelop2.1.3,5
+26, &gt; The bad news is that KDevelop3 currently has 120 reported bugs :(,5
+26, ftp://ftp.kde.org/pub/kde/unstable/snapshots/kdevelop.tar.bz2,4
+26, Subject: Re:  find callers of functions         ,4
+26," Let me first say, I am really impressed with gideon. ",2
+26, It shows a lot of potential! ,5
+26, Excellent work so far. ,6
+26, I am really looking forward to the stable releases.,2
+26," The specific feature I was looking for is still not present, although the grep works, as long as it is looking for pointers as foo-&gt;doit(); foo.doit() is not found.",2
+26, My coworkers did not all master regular expressions. ,0
+26," For them, a \""find callers\"" item that simply does what is requested without intimidating them with a dialog sporting an arcane regex would be close to ideal. ",0
+26, That menu item should be in the class view - the context menu of a function.,5
+26, The regex,6
+26, (\\.|\\-&gt;|::)[\\t ]*\\&lt;%s\\&gt;[\\t ]*\\(,4
+26, is getting close. ,6
+26," It finds the function definition itself and the \""\\fn ClassName::doit(), however - we may filter it out in a second pass.",5
+26," This would also find Bar::doit() even if Bar has nothing to do with Foo, but - nobody is perfect.",5
+26, -Rudiger,4
+26, --- Amilcar do Carmo Lucas &lt;a.lucas@tu-bs.de&gt; wrote:,4
+26, &gt; ------- You are receiving this mail because: -------,4
+26," &gt; You reported the bug, or are watching the reporter.",4
+26, &gt;      ,4
+26, &gt; http://bugs.kde.org/show_bug.cgi?id=61263     ,4
+26, &gt; ,4
+26, &gt; ,4
+26, &gt; ,4
+26, &gt; ,4
+26, &gt; ------- Additional Comments From a.lucas@tu-bs.de  2003-07-15 17:17,4
+26, &gt; -------,4
+26, &gt; ftp://ftp.kde.org/pub/kde/unstable/snapshots/kdevelop.tar.bz2,4
+26," I guess the feature you are talking about is like a 'Find Usage' feature as it works in IntelliJ IDEA (Java IDE), so, this is good. ",2
+26," I just want to add here, a some behaviour one could add while implelemnting this feature.",5
+26," Along with having a 'Find Usage' feature wich produce a list of places in the project like the 'Grep' do, is would be very nice to have an 'Hightlight Usage' feature wich is just hightlight the usage of a function or a variable in the currect file only and do not produce any windows. ",5
+26, Having binded this to some shortcut is very handy. ,5
+26, Look how it works: ,5
+26,  - The user presses Alt+Shift+F7 (e.g.) ,1
+26,  - Gideon hightligh the usage of currenlty selected funciton/variable (or one which is under the cursor and not selected) ,1
+26,"  - User got the response, make his/her mind clear about the usage ",1
+26,  - User press Esc and hightligh turned off. ,1
+26, This is comming. ,5
+26, Stay tunned! ,5
+26, Call Tree/Graph Viewer,1
+26," Not only \""Find Usage\"" - why can't C users have a \""Function Call Tree\"" view - either organised by caller or by callee.",5
+26," This used to be a standard part of IDEs such as Borland, but has been substituted with a Class Viewer - I don't say 'replaced' since a Class Viewer is no replacement for a Call graph view !",5
+26, Forgive me if this is in KDEv 3.0/Gideon ...,5
+26, *** This bug has been confirmed by popular vote. ***,4
+26, Doxygen includes similar information.  ,5
+26, It has a call graph but (unfortunately) lacks a called-by graph.,5
+26," It would also be nice if this feature was clever enough to understand C++ scoping rules, e.g. a call within foo::bar() to boo() could be a call to foo::boo() or boo() or a function within a namespace previously specified with \""using namespace\"".",5
+26, Grep will not provide enough intelligence to find such matches. ,0
+26, However it's not a bad start if use of a C++ AST is too complex.,5
+26, Just to get all these voters a bit excited: A basic experimental use-highlighter has been implemented in KDevelop4 the last days. ,1
+26," AFAIK it currently highlights only usages of variables, but extending that shouldn't be much of a problem.",1
+26, comming in kdevelop4.,6
+26, This is Fixed in KDevelop4,1
+26," Take a look at \""code navigation\"" blog on www.kdevelop.org for details",5
+27, version:           svn (using Devel),4
+27, OS:                Linux,4
+27, Installed from:    Compiled sources,4
+27," In amarok2-svn I like the the new contextview , but I found the new bottom bar for managing applets annoying , as it covers parts of other applets sometimes , like lyrics one , so that you miss a part of it. ",0
+27, Could be handy to have it appear and desappear onmouseover.,5
+27, thanks,6
+27," The real solution is to make it not cover applets, not make it appear/disappear on mouse over.",1
+27," i dont understand your point, dan... how do we make it not cover applets?",3
+27, Thats your problem to solve :),6
+27," The toolbar should be like the panel in kde, it gets it's own area to draw in (a strut in window manager terms). ",5
+27," The applets should not consider the space the toolbar takes up to be theirs to play in, but rather end at the top of it.",5
+27," well if i move a window on my desktop down, the panel does cover it. ",0
+27, so i still don't understand...,2
+27," right, but new windows placed on the desktop do not get placed under the panel, and maximizing windows doesn't put them under the panel either.  ",5
+27," You need to explicitely place the window under the panel, and I considder it a bug that it's possible (but that's not what this debate is about).]",5
+27, The panel should not obfuscate applets by default.,5
+27," I fully agree with Dan here, and I also fully admit that I don't have the slightest clue on how to implement this technically :)",2
+27," But I really think that what he wrote makes a lot of sense, if feasible.",2
+27, Created an attachment (id=32462) [details],4
+27, amarok-svn toolbar overlap,4
+27, Me and Dan are meaning this.. a screen is better then words sometimes :-),5
+27," i know what it looks like, 've been staring at it all day. btw, that screenshot is outdated now :)",2
+27, i still don't see how else you guys plan to visualize it. ,2
+27," do you just want a border for the applet area, so instead of hitting the panel directly, it ends at the border? ",5
+27," i mean, applets *will* be logically under the location of the panel---all the applets that a user can  have will not fit on the screen at the same time---so how else to show it?",5
+27, The applet should end where the toolbar begins.  ,5
+27," Applets should not be larger than the viewable area, if there's an applet above it, then the lower applet should get a smaller sizehint, and resize if necessary when it's the active applet (and therefore the only one on the screen)",5
+27," Basically, no applet should continue on off the screen, it should end at the panel.",5
+27," i disagree :) what you are describing is a very different use-case of the CV in general, and distinctly different from what the original idea that was developed. ",2
+27," in fact, i think there is another bug where we've already had this discussion (with mark), and this has come up on IRC. ",2
+27," anyway, this is not something to be fixed, but rather a change that needs to be discussed with people like e.g. leinir.",5
+27," regardless of all of this, the problem of \""applets falling off the end of the screen\"" should be mitigated when we are able to resize applets.",5
+27, You can't tell me that the screenshot attached to this bug is intended.,2
+27, There is no way to see the final line or two in the lyrics applet.  ,5
+27, This is a major bug.,5
+27," The bug that is being shown here is the fact that you cannot yet resize your applets, and as such we also don't set default sizes sanely. ",5
+27, You are reporting a bug on a non-completed feature ;),5
+27, infact it was a wish! ;-),5
+27," Of course :) Just thought i should point out that the feature is not yet completed - the polish that's gone into it Ù…ately could seem like an indication of feature completion, and as such it would seem the prudent course to inform you Ùhat that is not the case :)",5
+27, I don't think that this should be dependent on being able to resize freely at all...,2
+27," Most of the time, the sizegrip for resizing ends up in the bottom right corner, and as such, would be inaccessable reguardless of whether it was free sizing or not.",5
+27," The bug isn't that the applet can't be made smaller, but that part of the applet is completely inaccesible.",5
+27, I fully agree with Dan aswell. ,2
+27, I don't understand the confusion as it doesnt matter at all if an applet is resizable or not.,2
+27, To quote Dan:,6
+27," \""The applet should end where the toolbar begins.",5
+27," Applets should not be larger than the viewable area, if there's an applet above it, then the lower applet should get a smaller sizehint, and resize if necessary when it's the active applet (and therefore the only one on the screen)\""",5
+27, That's the expected behaviour and what is used in the playlist aswell. ,5
+27," Track items dont overlap the lower toolbar, do they?",3
+27, *** Bug 174221 has been marked as a duplicate of this bug. ***,4
+27," will be fixed in 2.1.1, done locally.",1
+27, I found it probably fixed in trunk :-) ,5
+27, can Leo confirm that? ,3
+27, we could close this....,5
+27," yep, sorry forgot to close when i pushed.",6
+28," Version:           0.9.0 (using KDE 3.3.0, Gentoo)",4
+28," Compiler:          gcc version 3.3.3 20040412 (Gentoo Linux 3.3.3-r6, ssp-3.3.2-2, pie-8.7.6)",4
+28, OS:                Linux (i686) release 2.6.8-gentoo-r3,4
+28," Since Kopete is a multimessenger and has the idea of metacontacts etc I don't think it's neccessary to display on which network the contact is online (because it doesn't matter), this makes even more sense if you have people who have several different accounts and irc nicks and keeping track of all of them can quite clutter the contact list, so I would simply like an option to turn of the displaying of the tiny icq/irc/etc icons right (or wherever you choose them to be) of the display name, hope this will be done any time soon, thanks for kopete it's such a great app!",0
+28, I'd like an option to do exactly the OPPOSITE ! :-) ,2
+28," In fact, the contact list is organised as [KopeteStatusIcon][ContactName][ProtocolIcon]. ",0
+28," Well, I'd like a way to tell Kopete to display only [ProtocolIcon][ContactName].",5
+28," In fact, the best way would be to allow a CSS customisation of the contact list, just as we can have in message windows :-)",5
+28, I am already considering adding that feature for the next version of Kopete; there are no technical or technological problems preventing it. ,2
+28," However, there may not be time to implement it before KDE3.4.",5
+28," On September 29, 2004 04:07 pm, Richard Smith wrote:",5
+28, &gt; ------- I am already considering adding that feature for the next version of Kopete; there are no technical or technological problems preventing it.,5
+28," &gt; However, there may not be time to implement it before KDE3.4.",5
+28," Richard, are you hinting that you are going to render the list view inside a  KHTML widget?",3
+28," That would be hella cool, but also hella complicated.",2
+28," On Wednesday 29 September 2004 9:13 pm, Jason Keirstead wrote:",5
+28," &gt; Richard, are you hinting that you are going to render the list view inside a KHTML widget?",3
+28," It's an option I'm considering, for sure. ",2
+28," But the current contact list code is quite flexible - flexible enough to allow me to throw together a drag-and-drop style editor for it, at least. ",5
+28, This needs more discussion before anything gets coded.,5
+28, Richard,6
+28, Something to think about for 4.1,6
+28, I think many people would be interested in showing this. ,2
+28, Maybe an option could be added (if enought demand) to disable it.,5
+28," Fixed in trunk (SVN commit 946606) will be in KDE 4.3, in trunk user can define contact list layout so you can hide the icons or change order.",1
+29, Version:            (using KDE Devel),4
+29, Installed from:    Compiled sources,4
+29, identation itself works fine.,4
+29, But:,6
+29, let's see this example:,5
+29," 	hello1",6
+29," 	    hello2",6
+29," 	hello3",6
+29," If you go with the cursor to hello2 and press ctrl-i, hello2 is moved even further to the right.",0
+29, The right (and expected) behaviour is that hello should be moved to the left so it is right under hello1.,0
+29, (compare it with the behaviour of tab in xemacs),0
+29," In my eyes, this really needs to be fixed.",0
+29, Thanks!!!,6
+29, Martin,6
+29," oh dear, the formatting is lost.",0
+29," Imagine, that hello2 is moved a bit to the right, like a \\t in front of it.",5
+29, Martin,6
+29," Hmm, why would hello2 move left?  ",3
+29, Are you saying it should align itself to the 'closest' tab boundary?,3
+29, So if you had a tabspace of 8 characters and you had,5
+29, ........hello,4
+29, ...........hello2,4
+29, Ctrl-I on hello2 should move it left because it's only 3 away from the left boundary but 5 away from the right one?,5
+29," For Kate, ctrl-I semantics have always been to unconditionally insert a 'positive' indent. ",5
+29, Positive meaning to the right.  ,5
+29, This is a bug wrt other editors ...,5
+29," hi,",6
+29," hello2 should be moved to the left, because it is not aligned with the line  above.",5
+29, Martin,6
+29, Martin KÃ¶bele  2003-10-25 09:30:53  -------,4
+29, let me try it again:,5
+29, let's say we have the code,5
+29, something ,4
+29, {,4
+29, ........hello1();,4
+29, ...........hello2();,4
+29, ........hello3();,4
+29, },4
+29," if you go now with the cursor in the line of hello2, hello2 should be moved to the left, because",5
+29," 1.) identation is about +8 spaces in a block, beginning from the opening parentheses (amount of spaces depends on your configuration of course).",5
+29, 2.) hello1 specifies where the block shall be aligned.,5
+29, Martin,6
+29," Right, so you are looking for an 'Align' action. ",5
+29,  This is more of a 'wishlist' since Kate doesn't really have this (see below).  ,5
+29, It has unconditional indent left and right.,5
+29, If you want hello2 to move left go to Tools and hit 'Unindent' which will move it left to the tab stop. ,5
+29," If you 'Indent' it will move to position 16, the next tab stop to the right.",5
+29, You can alternatively try 'Clean Indentation' and see if that aligns the misaligned blocks of code for you. ,5
+29, It will even out the misaligned blocks of code most of the time if it can. ,5
+29, *** Bug 71479 has been marked as a duplicate of this bug. ***,4
+29, *** Bug 75951 has been marked as a duplicate of this bug. ***,4
+29, This is available in cvs. ,5
+29, Currently it works only if you use the 'cstyle' auto-indenter.  ,5
+29, The default shortcut is CTRL + TAB (controlled tab) and will align the current line OR the block of text you select according to normal c/c++ conventions.,5
+29, See also bug 40656 for further information and a warning.,5
+29," How does this work with things inside parenthesis, like parameter lists and conditionals?",3
+29, I'd like to have it as in emacs:,2
+29, if ( foo == 1 &&,4
+29,      bar == 2 ) {,4
+29,    doit();,4
+29, },4
+29," In this case the second condition should be aligned with the first one, not according to normal stuff.",5
+29, And parameter list handling like:,5
+29, int foo(,4
+29,"          int bar,",4
+29,"          char *baz,",4
+29,          struct sizzle *gee,4
+29,         ),4
+29, {,4
+29,     ...,4
+29, },4
+29, In this case the closing parenthesis should be aligned with the opening one.,5
+29," Yes, your first example works as expected.",2
+29, Your second example kinda works right now.  ,2
+29, Parameter lists are aligned just like you expect but it needs a reference character in the 'int foo (' line to judge what col to align to after that.  ,5
+29," Also, closing parenthesis are not aligned with the opening one.  ",5
+29," If this is really a problem for you, open up another wishlist item with appropriate examples.",5
+29," great, thanks a lot!!",6
+29, there is one little bug though:,5
+29," .	.	foo();",4
+29," .	.	bar();",4
+29," if your cursor is in the line between foo() and bar(), in the line where no tabs are made yet and you press now the shortcut for the new align, the cursor just won't move under foo().",5
+29, but the rest of it works very nicely!,2
+29, Thanks guys!,6
+29," Maybe re-open this bug since I think the feature is incomplete, but I can open a new bugreport about this.",5
+29, Thanks,6
+29, Martin,6
+29," With regards to the foo-bar problem, this was intentional. ",5
+29, I didn't want to indent empty lines as that would leave quite a bit of useless leading spaces when selecting large regions and hitting Align -- it's also MUCH slower if I do not skip these lines when formatting an entire document. ,5
+29, I guess I could make it so that's only the case when you're aligning a _block_ of text though --,5
+29, I'll see what I can do.  ,2
+29, I cannot get this feature work. ,0
+29, Is this working on kde4 beta2?,3
+30," It would be usefull to add a \""Swap\"" button to quickly change the aspect ratio between portrait and landscape. ",5
+30, This is needed when extracting a portrait from a landscape photo.,5
+30," Since there is no sign that this is going to happen for 2.4, I am bumping the target to Future.",5
+30, *** Bug 355694 has been marked as a duplicate of this bug. ***,4
+30, I'm going to reset this to 2.4 because I expect to implement this very soon.,5
+30, An easier and much faster user interface: swap between portrait and landscape based on mouse movement.,5
+30, You already have to move the mouse to make your selection. ,5
+30, You'll likely do something that is approximately the right ratio. ,5
+30," If that's closer to portrait, then portrait should get used, otherwise landscape should get used.",5
+30, Another way to explain this:,5
+30," When the user makes the selection, select landscape mode if the horizontal mouse movement is greater than the vertical mouse movement, otherwise select portrait mode.",5
+30, That's one less confusing button occupying screen space.,5
+30, That's one less button to press. ,5
+30," You can work faster, with less hand/finger/wrist pain.",5
+30," Albert, you completely misunderstood this. ",2
+30, The point is being able to flip the aspect ratio after you have created your rectangle selection.,2
+30, Really? I found Alberts comment spot on. ,2
+30," It basically would eliminate the need for this kind of button, since both x and 1/x would work equivalently in the GUI.",5
+30, I don't see much point in being able to flip the aspect *after* the creation of the rectangle. ,2
+30, The placement of the resulting rectangle would need readjusting anyways (what is the fixed point of the rectangle while flipping?) and it sounds much more natural to me to be able to switch the orientation on-the-fly while creating the rectangle.,2
+30, I'm the reporter of the wish. ,2
+30," Sven is right, I meant that it would be usefull to have the swap option after the creation of the rectangle selection. ",2
+30," I do it \""by hand\"" often in that case :",5
+30,  I've a landscape photo that contains an interesting flower for example. ,5
+30," I want to print a photo that have the same proportions as the original, but in a portrait format, more adapted to my flower.",5
+30,"  1. I first \""take a shhot of the aspect ratio\"" by selecting all the original landscape photo.",5
+30,  2. I freeze the aspect ratio (with the appropriate checkbox),5
+30,  3. I shrink the rectangle to permit him to be rotated by 90Â°,5
+30,"  4. I \""rotate\"" him by taking my calculator, and calculating 1/[aspect ratio], and putting it by hand",5
+30,  5. I've now a perfect portrait zone wich I can adapt freely to my flower; and I'm happy :),5
+30,"  I don't know if adding a toolButton just to do it is a problem, but I really think I'm not the only one to do that sort of cropping on a photo.",2
+30, Thanks for interest !,6
+30, Bruno,6
+30, I agree that Albert's idea makes sense.  ,2
+30, Have gimp assume a landscape or portrait orientation automatically depending on whether the rectangular area swept out by the user is wider or higher.  ,5
+30," This might only be problematic when the aspect ratio was nearly, but not exactly square, but even here the user could control the proper aspect by exaggerating the motion in the larger of the two directions.",5
+30," If a swap button is maintained as in 2.3.12, then register the initial point used to sweep out the rectangular area and use that as the anchor rather than the upper-left corner as is now used.  ",5
+30, It is very likely that the first point selected by the user will be a desired point and this will not be the upper-left corner unless this happens to be where they started.,5
+30," As I stated elsewhere, it would also be great if the aspect ratio was automatically set to the initial aspect of the image being loaded.  ",5
+30," You might provide a \""lock\"" button to force the current aspect ratio to be retained upon subsequent loading of images for those times when someone wants to crop a series of pictures to the same proportions.  ",5
+30," Maybe the current Fix button could be a toggle that switched between \""Lock\"" (lock the aspect ratio - current behavior) \""Set\"" (automatically set the aspect ratio for each new image and then locks it) \""Auto\""(the Set behavior combined with the behavior suggested by Albert) or \""None\"".",5
+30," Having said this, I do appreciate having a toggle button at all.  Thanks.",5
+30, Making this depend on the user's mouse action is not discoverable. ,5
+30, There wouldn't be any way for the user to find out how to swap the aspect ratio. ,5
+30, No way.,6
+30, It might make sense to determine the initial aspect ratio this way. ,5
+30, But there still needs to be a button to swap it. ,5
+30, Comment #7 is exactly the usage scenario for this.,5
+30, This is now implemented in trunk and seems to work reasonably well. ,1
+30, Closing as FIXED.,1
+31," community has voted for. \r\nExamples include double-click-drag to select multiple words, triple-click, extensible hyperlink support and spell checking. \r\nWe should also improve the current search/replace dialog. \r\n[Platform Text, Platform UI,SWT]",5
+31, &gt;We should also improve the current search/replace dialog.,5
+31, Those will be minimal improvements like being able to resize the dialog. ,5
+31, We won't completely redesign the dialog e.g. to provide Firefox-like search unless it is contributed by a patch.,5
+31, Here is few things to look at:,5
+31, -- Ctrl-Backspace don't work in all text editor widgets (try fields in search dialog or text fields in plugin.xml editor),5
+31, -- support for seaching multiline text and alow to replace into multiline text,5
+31, -- improve usability of search dialog. ,5
+31," Namely, replace direction radio buttons with additional buttons like \""Find previous\"", \""Replace previous\"". ",5
+31, This would make getting back to accidentally skipped search match much easier.,5
+31, &gt;-- Ctrl-Backspace don't work in all text editor widgets (try fields in search dialog or text fields in plugin.xml editor),0
+31," Please file separate bug reports, e.g. we do not control the PDE editor - thanks.",5
+31, &gt;-- Ctrl-Backspace don't work in all text editor widgets (try fields in search,0
+31," The problem here is that JDT UI started to map the text editor's editing commands onto the text, combo and other widgets using TextFieldNavigationHandler.",0
+31, It would be possible push parts of TextFieldNavigationHandler down to Platform Text to provide this for dialogs around the editor but I think this is a more general issue since users then also expect the navigation commands to work in,0
+31," wizards, Ctrl+H search pages etc. ",5
+31, But this can't be adopted by JFace because they don't depend on the text editor plug-ins.,0
+31," To solve this, JFace will have to adopt/define editing commands that can be used along with widgets and would have to provide the navigation handler(s).",5
+31, Can you file a bug report against Platform UI and describe the problematic.,3
+31, Please add myself to the cc-list. Thanks.,2
+31, (In reply to comment #0),4
+31, &gt; extensible hyperlink support,4
+31," I would prefer if extensive hyperlink support is much lower (ideally at the StyledText widget but if not, at the JFace level). ",5
+31, UI Forms would like to port from FormText to StyledText. ,5
+31, StyledText has added many key features in 3.2 time frame with hyperlink support being the last one we need in order to port.,5
+31," Dejan, you're not allone ;-) ",5
+31, Feel free to add your comments to bug 156219. ,5
+31, The one in text land is bug 88293.,5
+31, I'd like to throw in bug 145959 (forgive me if this doesn't apply to text editors):,2
+31," On Windows, multi-line text boxes as used e.g. in the Run-&gt;Arguments dialog should support Return key in two ways:",5
+31, [Return]: add CR/LF to current text box,1
+31, [Ctrl-Return]: send Return key to parent dialog (similiar to executing the default action).,1
+31,  &gt;I'd like to throw in bug 145959 (forgive me if this doesn't apply to text editors):,2
+31, Nothing to forgive just to ignore ;-) ,2
+31, This plan item covers Platform Text. ,5
+31, You have to place your feature with Platform SWT.,5
+31, Completed as of I20070327-0800.,1
+31," Some were hoping to drag source code is 3.2, perhaps they'll get it 3.3. ",5
+31," And of course, it should be optional for those who would have a man run ahead of a horseless carriage with a red flag.",5
+32, User-Agent:       Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.7b)Gecko/20040316,4
+32, Build Identifier: Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.6)Gecko/20040206 Firefox/0.8,4
+32," There needs to be a way to open sidebar resources, such as the history and bookmarks, in their own window. ",5
+32, It's more convenient to have a single history window that doesn't take up screen real estate than having to open the history in whichever window I'm currently browsing. ,5
+32, I like the CTRL-B and CTRL-H features of Mozilla and would like that carried over. ,2
+32, I know bug 178199 discusses CTRL-B (WONTFIX but perhaps CTRL-SHIFT-B) in particular but I'm talking about depending on the side bar at all. ,5
+32, I really hate sidebars and would want to be able to disable them in place of these windows before I would migrate to Firefox.,5
+32," Since the roadmap is now to focus on the standalone apps with \""a conservative,sustaining engineering fashion\"" type of support for Mozilla/SeaMonkey, I think a \""SeaMonkey Parity\"" of some form should be established.",5
+32, Thanks.,6
+32, Reproducible: Always,5
+32, Steps to Reproduce:,5
+32," A bookmark manager window already exists, and bug 178199 covers giving it a better keyboard shortcut than Alt,B,M.",0
+32, I don't see a bug for adding a history window.,2
+32, how about something like about:history?,3
+32, similar to about:config - just a full page tree with a search/filter field at the top.  ,5
+32, you wouldn't really need a menu or toolbar buttons like with the bookmarks manager.  ,5
+32," but like the bm and unlike the sidebar, it would have all the sortable columns: name, url, last visited, first visited, number of visits, etc.",5
+32," it would be the \""power-user\"" supplement to the simple history sidebar.  ",5
+32," sure, the sidebar needs a few things fixed like searching urls, but other than that, i think it's fine for most uses - exactly what sidebars are for - a quick way to access something without leaving/obscuring the current page.  ",5
+32, and an about:history page would nicely fill in the gap left on the advanced end.  ,5
+32," a whole new history window is probably overkill, and a page could just as easily be opened in its own window or in a tab.  ",5
+32," while i'm brainstorming, you could probably even add a search shortcut ability so you could type something like",5
+32," about:history?extensions to open the history page and filter pages with \""extensions.\""",5
+32, compare:,5
+32, chrome://browser/content/history/history-panel.xul,4
+32, chrome://browser/content/bookmarks/bookmarksPanel.xul,4
+32, chrome://browser/content/bookmarks/bookmarksManager.xul,4
+32, about:config,4
+32," reporter,",6
+32," not sure if you're asking for a whole new history window, or just the ability to open the sidebar history in its own window.  ",5
+32," if the latter is the case, then just open the above chrome url in a new window.",5
+32, the component and other fields probably need to be updated.,5
+32, I'm really looking for two things:,2
+32, 1. A separate window so I can keep going back to the same window and open multiple windows from this window.,5
+32, chrome://browser/content/history/history-panel.xul would meet this need.,4
+32, 2. Being able to see and sort the history. ,5
+32," Seamonkey offers tabs for Title, Location, Last Visited, First Visited, Hostname, Referrer, and Visit Count. ",5
+32, Not all of this is needed but at least the first four are helpful.,5
+32," Plus, I'd like to be able to open this easily, such as with /-\\H.",2
+32, Please add the Mozilla history window in Firefox! ,5
+32, I think this is just one of the things that's missing in inferior browsers like Microsoft Internet Explorer.,2
+32, The Mozilla history window is just perfect!,2
+32, (In reply to comment #3),4
+32, &gt; I'm really looking for two things:,4
+32, &gt; ,4
+32, &gt; 1. A separate window so I can keep going back to the same window and open multiple windows from this window.,4
+32, &gt; chrome://browser/content/history/history-panel.xul would meet this need.,4
+32, &gt; ,4
+32," &gt; 2. Being able to see and sort the history. Seamonkey offers tabs for Title, Location, Last Visited, First Visited, Hostname, Referrer, and Visit Count. ",4
+32, &gt; Not all of this is needed but at least the first four are helpful.,4
+32, Firefox sure doesn't seem like a total product with a decent history.  ,0
+32," EHM, Enhanced History Manager, is an extension that does it nicely.",1
+32, http://forums.mozillazine.org/viewtopic.php?p=1749502#1749502,4
+32, I agree that the firefox history is limited at best. ,2
+32, I'm amazed that there is no way of knowing what the url or date of a history entry is. ,2
+32, Mozilla history was excellent since you could re-trace your browsing using the timestamp and find collections of pages you'd visited.,5
+32,  History (in life and browsing) is more useful when there is a context.,5
+32, Shouldn't there be an option to see when and what order a page was visited?,3
+33, Version:           svn (using Devel),4
+33, Compiler:          gcc 4.3.2 gentoo,4
+33, OS:                Linux,4
+33, Installed from:    Compiled sources,4
+33," If you navigate, using the file browser, to a song in the collection and select \""move to collection\"", and ensure that the new file name is the same as the old file name, the song is renamed to itself (not renamed), then deleted.",5
+33,"  The fix for this it to make sure that songs moved into the collection are not removed during the \""move to collection\"" operation. ",1
+33, A patch is below.,5
+33, Created an attachment (id=28078) [details],4
+33, bug fix,5
+33, Patch by Jason A. Donenfeld &lt;Jason@zx2c4.com&gt;,6
+33, This patch fixes the bug by checking if the song is in a collection before removing it after the move operation. ,1
+33, A potential problem is that it may fail to remove it from a collection when moving a track from one collection to another.  ,0
+33," Just for the record, this patch is incorrect and shouldn't be applied.",5
+33, Created an attachment (id=28083) [details],4
+33, semi correct patch,6
+33, Patch by Jason A. Donenfeld &lt;Jason@zx2c4.com&gt;,6
+33," This patch fixes the problems of the above patch and gets to the heart of the issue: \""KIO::file_copy\""ing with the src and dest the same will erase the file.",1
+33, This patch checks to see if the KURLs are identical before attempting to copy.,1
+33," This is the same logic as used elsewhere in the modified file, so it was chosen to keep convention.",5
+33," However, it still suffers from a problem: if the KURLs point at the same location but have different string paths, for example /home/user/music/artist/song.mp3 and /home/user/music/artist//song.mp3, the test will fail. Therefore, this patch needs only a fix for this comparison problem, and then it should be ready to be applied.",0
+33," Jason, you can use KUrl::cleanPath() to fix this.",5
+33,  See here:,6
+33, http://api.kde.org/4.x-api/kdelibs-apidocs/kdecore/html/classKUrl.html#05eaea3296e3778f04014bd943ac894a,4
+33, Created an attachment (id=28087) [details],4
+33, fixed final flaw,6
+33, Mark - thanks for the suggestion. ,6
+33, This patch solves the above patch's problems.,5
+33, Patch by Jason A. Donenfeld &lt;Jason@zx2c4.com&gt;,4
+33," \""KIO::file_copy\""ing with the src and dest the same will erase the file, so this patch checks to see if the KUrls are identical, after cleaning the urls, before attempting to copy. ",4
+33," Since Max is the author who wrote the Collection code (including copying/moving), I'm going to wait for his approval to this patch before committing, lest we make an oversight.",5
+33, Sebr - sounds good. ,6
+33," I can commit it myself, hopefully, because I should have svn commit access soon enough. ",2
+33," (sysadmins are usually pretty fast, no?)",3
+33," I can't test this at the moment, but I've got a couple of comments after reading the bug report and the patch:",2
+33," I didn't look up the api documentation, but using KIO::file_copy with the same source and destination url sounds like a bug in kdelibs. ",2
+33, And I don't think that that is actually happening.,2
+33," Because you are moving from the filebrowser, SqlCollectionLocation doesn't notice that it's dealing with a file already in the collection, and therefore doesn't use the special code that stops it from removing files from the source collection.",2
+33, I am a bit surprised that the patch even works (does it?). ,2
+33," CollectionLocation should be removing the source files (because you are *moving* files) after the copy operation, which is probably when your files actually are deleted.",5
+33," Max,",6
+33, This was my initial thought too... ,2
+33, that really the problem was that it was removing the source after moving.,0
+33," But then I fully mapped the flow, and I saw that that section never even gets called if sourceLocation = 0 (if it's coming",2
+33, from a file and not another collection). ,2
+33," The logic for that part works fine, with m_tracksRemovedByDestination being correctly populated and processed. ",2
+33, The thing is that removal code is never called when sourceLocation = 0. ,0
+33," Generally copying or moving a file into itself will delete the file; I've seen this behavior in other languages and commands, and kio doesn't appear to be an exception.",2
+33, The patch does in fact work.,5
+33," Something still may be suspicious, though.",0
+33," Jason, are you sure that FileCollectionLocation::removeTrack does not get called?",3
+33," I just checked the code which starts the move operation in the filebrowser, and it creates a FileColelctionLocation.",5
+33,  ,6
+33," Therefore sourceLocation will always be 0, the file will be copied (and deleting a file whehn copying or moving it onto itself *is* a bug), and *CollectionLocation* will call removeTrack on the source location as part of its workflow.",0
+33," Aaaaa hah! With job never being assigned, slotJobFinished is never called, and if slotJobFinished is never called,  slotCopyOperationFinished is never called, and if slotCopyOperationFinished is never called, slotFinishCopy is never",0
+33," called, and if slotFinishCopy is never called, removeSourceTracks is never called, and if removeSourceTracks is never called, remove is never called, and if remove is never called, QFile::remove is never called.",0
+33, This shouldn't happen though. ,2
+33," While this works, you're right: there is something screwy going on. ",2
+33, Why doesn't slotCopyOperationFinished get called independently of slotJobFinished? Or is it supposed to work this way?,3
+33," no, slotCopyOperationFinished should be called if we don't actually have to copy any tracks.",0
+33,  That's a bug.,0
+33, Ok. I see how it all works now. ,2
+33, New patch coming soon.,5
+33, Created an attachment (id=28094) [details],4
+33, adds movedByDestination to CollectionLocation,1
+33," ignoredDestinations was removed, as this was no longer pertinent, since it was only used in the flow from a job event.",1
+33," movedByDestination was added to collectionLocation, since this is something all collectionlocations will potentially need to account for. ",1
+33, slotCopyOperationFinished is now called if no job is created. ,1
+33," Since m_removeSources is now protected and part of CollectionLocation, collections that cannot move but only copy will just set m_removeSources to false in their constructor. ",1
+33," If you like this, I'm able to commit myself now. ",5
+33, But I'm guessing you'll have suggestions.,2
+33, I should probably make the map private and just add another protected accessor function. ,5
+33," If we go this route, I should also make the protected accessor functions virtual and add proper comment documentation. ",5
+33, SVN commit 876841 by jdonenfeld:,5
+33, This prevents deleting a song when moving it or organizing it into its original path name by making sure the source and ,1
+33, destination are different before [re]moving. ,1
+33," This functionality is also potentially extended to all CollectionLocations, as now the base class has public functions to keep track of such things. ",1
+33, This also cleans up the logic and flow quite a bit.,1
+33, BUG: 173341,4
+33,  M  +29 -2     CollectionLocation.cpp  ,4
+33,  M  +18 -3     CollectionLocation.h  ,4
+33,  M  +27 -44    sqlcollection/SqlCollectionLocation.cpp  ,4
+33,  M  +1 -6      sqlcollection/SqlCollectionLocation.h  ,4
+33,  M  +5 -5      support/FileCollectionLocation.cpp  ,4
+33,  M  +0 -5      support/FileCollectionLocation.h  ,4
+33, WebSVN link: http://websvn.kde.org/?view=rev&revision=876841,4
+34, Version:            (using Devel),4
+34, Installed from:    Compiled sources,4
+34, OS:                Linux,4
+34, from some time ago ctrl+c stops work,0
+34, i have 2.1 konsole (kde 4.0.80+r762060 from trunk),0
+34, reproduce:,6
+34, sleep 10 and press ctrl+c,0
+34, so now i use ctrl+z; kill %1; fg,0
+34, Same problem here.,5
+34," Another thing which is IMHO releated: the konsole \""window cursor\"" does not get anymore the focus (the cursor gets not filled white).",0
+34, This issues has appeared some days ago..,0
+34," Some info: when I use completion, C-c works (i.e. type \""pTABTAB\"", while bash is tallying the possible completions, C-c stops the process and returns the prompt).",0
+34," This bug is possibly not in konsole, because yesterday I can't use C-[S-]v to paste in any app (including konsole), or C-l to clear screen (in konsole, gajim and pidgin).",5
+34," Grepping ~/.xssession-errors only yields one \""error\"" in the search krunner runner.",0
+34," I get this with new konsole too, it works with some progs like strace, but not with others like ruby (which works fine in a vt).",0
+34, This issue makes working with Konole really hard.. ,0
+34, you always need to kill jobs from another Konsole... ,0
+34, There are a lot of people asking about this issue on IRC.,0
+34, I cannot reproduce here.,2
+34," &gt; I get this with new konsole too, it works with some progs like strace, but not with others like ruby (which works fine in a vt). ",0
+34, That is bizarre.  ,2
+34, I cannot think why the behavior might depend on what is running on the terminal.  ,2
+34, &gt;  There are a lot of people asking about this issue on IRC. ,5
+34, Are they running Konsole from the KDE 4.0 branch or trunk?,3
+34, &gt; Are they running Konsole from the KDE 4.0 branch or trunk? ,3
+34, You could winding kdebase/apps/konsole back a few revisions to see if the problem disappears.  ,5
+34, If you get as far as the KDE 4.0.0 tagging then it is likely somewhere else.,5
+34, Running trunk. Noticing this for some days.,0
+34," Working around that by doing \""Ctrl-Z and kill %1\""...",5
+34, *** Bug 156320 has been marked as a duplicate of this bug. ***,4
+34, &gt; Running trunk. Noticing this for some days.,5
+34," As I cannot reproduce, I need to know which revision introduced the bug.  ",2
+34, You can use svn up -r &lt;revision&gt; to change kdebase/apps/konsole/src to an earlier revision.,5
+34, I can confirm this problem. ,2
+34, The first revision where it happens is 760614:,5
+34, http://websvn.kde.org/?view=rev&revision=760614,4
+34, i'm running trunk. ,0
+34, i can ctrl+c svn for example or a compile job. ,0
+34, but i can't ctrl+c dselect (or btdownloadcurses or ...),0
+34," after i switch to konsole window, cursor doesn't filled and ctrl+c doesn't works, but if i type something then this passes to konsole _and_ cursor became fillled after that i'm able to use ctrl+c",0
+34," ie, switch to konsole",0
+34, press &lt;space&gt; (to get cursor filled),0
+34, press ctrl+c (will work now),0
+34," this doesn't always work, cursor became filled, but ctrl+c doesn't work",0
+34, ctrl+c works in bash or read prompt (even with non-filled cursor),0
+34," Robert, I can confirm what Paolo said: it happens first in 760614 revision (porting to KProcess).",3
+34, I also noticed this warning in Session.cpp's Session::sendSignal() function:,5
+34," #warning \""TODO: Send the right signal here, QProcess::kill() always sends SIGKILL\""",5
+34," I blindly tried to replace _shellProcess-&gt;kill() with _shellProcess-&gt;terminate(), but that did not help, so I gave up :)",5
+34, Maybe this even not that piece of code that causes the problem (although seems quite related).,5
+34, Maybe you'll have some further ideas.,5
+34," And I wasn't able to reproduce this bug on my machine at work, although both home and work machines run Debian/testing (but have different hardware).",0
+34, I'm puzzled what can cause this :),0
+34," But while it's reproducable here, at home, I can test your ideas if any.",0
+34, &gt; I also noticed this warning in Session.cpp's Session::sendSignal() function: ,5
+34, That is only called at the end of the terminal session to kill the main shell process.  ,5
+34, Otherwise Konsole doesn't touch any processes directly - it just sends the key presses you enter to the terminal.,2
+34, &gt; although both home and work machines run Debian/testing,5
+34," In other words, they have the same versions of all common software?",3
+34, &gt; (but have different hardware),5
+34, Do they use the same type of CPU?  ,5
+34, I don't suppose it could be a 32bit / 64bit difference?,3
+34," Ah, no, seems unrelated :)",2
+34, How about this:,5
+34, void Pty::lockPty(bool lock),4
+34, {,4
+34," #warning \""TODO: Support for locking the Pty\""",4
+34,   //if (lock),4
+34,     //suspend();,4
+34,   //else,4
+34,     //resume();,4
+34, },4
+34, Not sure if this is it too...,2
+34," &gt; In other words, they have the same versions of all common software?",3
+34," Well, currently not, because I forgot that I updated home machine to debian/sid, but I recall that I was seeing this bug before I upgraded.",5
+34, Mmmm... not 100% sure though. 90% ;),2
+34, &gt; Do they use the same type of CPU?  ,3
+34, &gt; I don't suppose it could be a 32bit / 64bit difference? ,3
+34, Yep. ,6
+34, Both use intel core duo,5
+34, &gt; Not sure if this is it too... ,2
+34," No, that is called when Ctrl+S or Ctrl+Q is pressed.",2
+34, Can you try changing the interrupt key sequence to something else and see if it makes any difference.,5
+34," For example, change the interrupt key to Ctrl+Y",5
+34, stty intr /-\\Y,4
+34," Then try strace, sleep, make etc. but use Ctrl+Y instead of Ctrl+C to kill them.",5
+34, Chatting with ossi bringed up another very interesting usecase:,5
+34, Fact: ctrl-c doesn't work in konsole,0
+34, Next step: launch xterm and launch  strace -ttt -o konsole.trace konsole --nofork,5
+34," Now in that started konsole app, 'make' breaks just ok!",5
+34, Wonders :),6
+34, strace fixes things :),1
+34, After changing /-\\C to be /-\\Y situation is the same for /-\\Y as it was for /-\\C:,5
+34," e.g. /-\\Y breaks 'strace', but not 'make'",5
+34, &gt; strace fixes things :) ,4
+34," You're doing two things there though, running Konsole with strace and also with the --nofork argument.  ",5
+34," To be sure which was making a difference, you'd need to:",5
+34," 1.  Run \""konsole --nofork\"" (without strace) and see if the problem is still there.",5
+34," 2.  Start Konsole normally (with no arguments), then attach to it with strace (using strace -ttt -p &lt;pid of konsole&gt;) and see if the problem is still there.",5
+34," The problem disappears for me with both 1 and 2, while changing the interrupt sequence has no effect just like Dmitry reported.",5
+34," Any idea where to look in the code, where to set breakpoints, etc...?",3
+34, Fixed by SVN commit #771570.,1
+34," \""Fix Ctrl+C not killing applications on some users' systems.  ",1
+34," Reset all signal handlers to the default (SIG_DFL) in the child process after forking\""",1
+35, Version:            (using Devel),4
+35, Installed from:    Compiled sources,4
+35, OS:                Linux,4
+35," Using nightly builds from project Neon,  kdebase version 20080617+svn821478-0neon1",1
+35, There seem to be some problems with the zoom out view.  ,0
+35, It doesn't layout the activities properly.,0
+35, Steps to reproduce:,0
+35, 1. Zoom out.,0
+35, 2. Add Activity.,0
+35," Now only the newly added activity is shown, in the top left corner of the screen.",0
+35, 3. Zoom in.,0
+35, 4. Zoom out.,0
+35," Now both the activities are shown, but not in the order they were added, and there is some whitespace around them.",0
+35," If another activity is added, this happens again, and have to zoom in and out twice to get all 3 activities to show.",0
+35," Same here at openSUSE, KDE 4.1 beta 2.",5
+35," I'm using NVidia binary drivers btw, have an NVidia Geforce 6600 GT.",5
+35," Just found out that the \""offset\"" of the activity overview changes when you double click on the second activity. ",0
+35, The same probably happens too when adding an activity.,0
+35," At this point, it's not possible anymore to use drag&drop to move to the first activity. ",0
+35," Only zooming out, selecting the first, and zooming in fixes it.",1
+35," yeah, that regression crept in a while ago, and it's been bugging me a lot.",2
+35," we've actually got multiple bugs in this report, it'd be nice to separate them out (but I have to leave in a minute).",5
+35," 1) adding/switching activity makes the view jump suddenly to another place (it's trying to make sure the activity is visible, and being stupid about it)",0
+35, 2) dragging the view around to see other activities no longer works (regression! it worked before woc),0
+35," Actually, dragging around the view does work here *except right after adding an activity*.  ",2
+35, I just didn't know about that functionality when I filed this report.,2
+35," Adding an activity makes the view jump to another place, and also the placement of the new activity seems arbitrary.",0
+35, Bug = Add activity focuses view on the new activity until zoom level changes,0
+35," well then, let's make the title a bit clearer",5
+35, I think add activity option (and zoom out) should be removed in the 4.1 final.,2
+35," This bug is quite big, plus there's no clear way to delete an activity. ",0
+35," Also,performance when zoomed out is slow as hell.",0
+35, I didn't report this issues because some of them are already reported and I thought others are pretty obvious.,2
+35," Don't get me wrong, it's a great idea, but it's current status makes it confusing, useless and buggy :S",2
+35, performace is fine for me. ,2
+35, are you using nvidia?,3
+35," there are already people making use of multiple activities, we're not going to take that away from them.",5
+35," it'd be really really nice if this bug could be fixed somehow, though.",2
+35, &gt; This bug is quite big,4
+35," so huge it crashes your machine, loses dat, etc, right? ",3
+35," this is a molehill, stop making it into a mountain.",5
+35," &gt; but it's current status makes it confusing, useless and buggy",4
+35, so don't use it. ,5
+35, we have gotten many reports of people who DO like it and are using it for day to day work. ,5
+35, i suppose your desire to see this set of problems hidden overrides their productivity?,2
+35, and if we'd taken this approach in 4.0 we'd be even further behind.,2
+35, SVN commit 838477 by chani:,4
+35," when a new activity is added, don't move more than necessary to show it this seems to fix dragging the view around too :)",1
+35, BUG: 164545,4
+35, please backport.,5
+35,  M  +7 -1      view.cpp  ,4
+35, WebSVN link: http://websvn.kde.org/?view=rev&revision=838477,4
+36, Version:            (using KDE 4.1.2),4
+36, Installed from:    Compiled From Sources,4
+36, Amarok version 1.94,4
+36," When moving a large amount of files to my collection, amarok2 opens a file dialog for every single file that it moves. ",0
+36, To reproduce:,6
+36, Make a directory where you would like your music collection to be stored. ,0
+36, Go in to amarok2 and set it up so that the new collection area is included. ,0
+36," Then, right-click on local collection, select organise and select the new destination for the files.",0
+36," Even my Core 2 Duo with 2 GB of RAM could not handle 16,000 file dialogs, and crashed my whole system hard, requiring a reboot.",0
+36, Can we please either:,5
+36," 1) move the files sequentially, or",5
+36, 2) not display a file dialog?,5
+36," Sorry, I can't reproduce this. ",2
+36," I just tried, and there is information shown in the progress bar and nowhere else.",2
+36, I'm copying tracks to my local sql collection. ,5
+36, I assume you are doing the same?,3
+36, Are you using Amarok to move the files? ,3
+36," It still opens a file dialog for every file that it is \""organising\""",0
+36, I just checked again.,5
+36, I have the following options ticked on in the Organise files option.,5
+36, Use cover art for folder icons,5
+36," Ignore \""the\"" in artist names",5
+36, Group by file type,5
+36, Replace spaces with underscores,5
+36, restrict to ASCII,5
+36, VFAT safe filenames,5
+36, Overwrite destination,5
+36," It might be that one of those options trigger this, or the combination.",5
+36, Weird.,6
+36," Once I started messing around with what is ticked, the problem went away.",0
+36, Now I am also unable to reproduce it. ,0
+36, I have been able to reliably reproduce the bug. ,0
+36," Use the files tab of amarok, then click on the directory that you want to move the files from, select move to collection. ",0
+36, Select the following:,0
+36, Use cover art for folder icons ,0
+36," Ignore \""the\"" in artist names ",0
+36, Group by file type ,0
+36, Replace spaces with underscores restrict to ASCII ,0
+36, VFAT safe filenames ,0
+36, Overwrite destination ,0
+36," It makes lots of file transfer windows for me, every time. ",0
+36, -Evert-,4
+36, I still can't reproduce this.,2
+36,"  Are you using copying using Amarok's filebrowser, or are you organising the collection browser?",3
+36," How did you install amarok (compiled, packages etc) and which platform are you using",3
+36, I am using Amarok's file browser. ,5
+36," I think so, anyways. ",6
+36, I click on the files tab.,0
+36, I have noticed that I only get the lots of file moving dialogs if I have all of those options ticked. ,0
+36, Right now I am moving my files in to my collection with Overwrite destination unticked and I do not get the file dialogs then. ,0
+36," I downloaded the source of amarok 1.94, and compiled it with gcc 4.2.3",0
+36," I am using Sorcerer Linux, so all software on my system is hand-optimized and locally compiled.",0
+36, -Evert-,4
+36, SVN commit 881542 by seb:,4
+36, Fix boolean logic which caused the progress info to be shown when overwriting tracks during a collection copy.,1
+36, BUG: 174533,4
+36,  M  +2 -0      ChangeLog  ,4
+36,  M  +1 -1      src/collection/sqlcollection/SqlCollectionLocation.cpp  ,4
+36, WebSVN link: http://websvn.kde.org/?view=rev&revision=881542,4
