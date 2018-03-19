@@ -1077,7 +1077,7 @@ bug report ID,sentence,intention
 19, Group title is not taken into account by Window-Eyes 4.5.,0
 19, The group title should be pronouced before radio buttons or other controls.,0
 19," It is not, this is bug since blid users cannont know what the group content is dealing about.",0
-19, Interesting. ,7
+19, Interesting. ,6
 19," Both Window-Eyes and JAWS will read a Group title IF the Group has a single child that does not have an obvious name, for example, a text or a list or a combo box.",0
 19," But neither screen reader will read a Group title if it groups a set of radio buttons or check boxes, say. ",0
 19," (Or, I assume, if it is surrounding something that has an obvious label to read instead, like a button, and if the child control takes focus).",0
