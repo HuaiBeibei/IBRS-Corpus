@@ -8,4 +8,4 @@ This is the corpus using in IBRS model
   It is corpus for intention classifier. We annotate each sentence in bugreports.xml with a  intention category 
   (use a number (0-6) represent). Each row consists of the bug report ID the sentence in, sentence content and the intention category
   
-  0 is Bug Description. 1 is Fix Solution. 2 is Opinion Expressed. 3 is Information Seeking. 4 is Information Giving. 5 is Meta/Code. 6 is Emotion Expressed.
+  0 is Bug Description. 1 is Fix Solution. 2 is Opinion Expressed. 3 is Information Seeking.  4 is Meta/Code. 5 is Information Giving. 6 is Emotion Expressed.
